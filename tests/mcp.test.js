@@ -70,6 +70,19 @@ test("MCP: initialize, tools/list, dan edit proyek tanpa ffmpeg", async () => {
   assert.ok(bad.result.isError);
   const templates = await c.call("cutkit_list_templates", {});
   assert.ok(templates.some((t) => t.name === "Fakta Shorts" && t.slots.length === 3));
+
+  fs.writeFileSync(path.join(dir, "Kucing Lucu.png"), "x");
+  fs.writeFileSync(path.join(dir, "boom.mp3"), "x");
+  fs.mkdirSync(path.join(dir, "sub"));
+  const media = await c.call("cutkit_list_media", { folder: dir, kind: "image" });
+  assert.deepEqual(media.files.map((f) => path.basename(f.path)), ["Kucing Lucu.png"]);
+  assert.deepEqual(media.folders.map((f) => path.basename(f)), ["sub"]);
+  assert.equal((await c.call("cutkit_list_media", { folder: dir, search: "BOOM" })).files[0].kind, "audio");
+
+  const prompts = await c.request("prompts/list", {});
+  assert.ok(prompts.result.prompts.some((p) => p.name === "buat_shorts"));
+  const got = await c.request("prompts/get", { name: "buat_shorts", arguments: { folder: "D:\\Bahan" } });
+  assert.match(got.result.messages[0].content.text, /D:\\Bahan.*cutkit_list_media/s);
   c.close();
 });
 
@@ -88,6 +101,13 @@ test("MCP: video cepat lalu ekspor sungguhan (butuh cutkit-cli dan ffmpeg)", { s
   const q = await c.call("cutkit_quick_video", { project: proj, voice: vo, visuals: [a, b], script: "ini video dari mcp" });
   assert.ok(Math.abs(q.duration - 3) < 0.05);
   assert.equal(q.captions.words, 4);
+  const frames = await c.request("tools/call", { name: "cutkit_preview_frame", arguments: { project: proj, times: [0.5, 2.5], height: 640 } });
+  const images = frames.result.content.filter((x) => x.type === "image");
+  assert.equal(images.length, 2, JSON.stringify(frames.result).slice(0, 300));
+  const png = Buffer.from(images[0].data, "base64");
+  assert.equal(png.toString("latin1", 1, 4), "PNG");
+  assert.deepEqual([png.readUInt32BE(16), png.readUInt32BE(20)], [360, 640], "kanvas 1080x1920 diperkecil ke tinggi 640");
+  assert.notEqual(images[0].data, images[1].data, "detik 0.5 (merah) beda dengan 2.5 (biru)");
   const out = path.join(dir, "hasil.mp4");
   const ex = await c.call("cutkit_export", { project: proj, output: out, quality: "fast" }, { progressToken: "p1" });
   assert.equal(ex.output, out);

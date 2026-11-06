@@ -6,10 +6,13 @@
  * dengan aplikasi (ui/core), lalu menjalankan pekerjaan berat lewat cutkit-cli:
  * probe media, ekspor MP4, auto caption Whisper, TTS Piper, ketukan, hapus background.
  *
- * Pakai di Claude Code:   claude mcp add cutkit -- node "<repo>/mcp/server.js"
- * Lokasi cutkit-cli: env CUTKIT_CLI, atau <repo>/target/release/cutkit-cli.exe.
+ * Cara termudah: aplikasi CutKit → Proyek → Hubungkan ke Claude (MCP).
+ * Manual (Claude Code):  claude mcp add cutkit -- node "<folder>/mcp/server.js"
+ * Lokasi cutkit-cli: env CUTKIT_CLI, di samping file ini (versi terpasang),
+ * atau <repo>/target/release/cutkit-cli.exe.
  */
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 
@@ -17,11 +20,21 @@ const ROOT = path.resolve(__dirname, "..");
 const T = require(path.join(ROOT, "ui/core/timeline.js"));
 const C = require(path.join(ROOT, "ui/core/captions.js"));
 const TP = require(path.join(ROOT, "ui/core/templates.js"));
-const VERSION = require(path.join(ROOT, "package.json")).version;
+const VERSION = (() => { try { return require(path.join(ROOT, "package.json")).version; } catch { return "0.1.0"; } })();
+const LIBRARY = [
+  { name: "Meme Templates", path: "D:\\Master\\Pictures\\Meme Templates" },
+  { name: "Sound Effect Meme", path: "D:\\Master\\Music\\Sound Effect Meme" },
+];
+const MEDIA_EXT = {
+  video: ["mp4", "mov", "mkv", "webm", "avi", "m4v"],
+  image: ["png", "jpg", "jpeg", "webp", "gif", "bmp"],
+  audio: ["mp3", "wav", "m4a", "aac", "ogg", "flac", "opus"],
+  caption: ["srt", "json"],
+};
 
 function findCli() {
   const exe = process.platform === "win32" ? "cutkit-cli.exe" : "cutkit-cli";
-  const candidates = [process.env.CUTKIT_CLI, path.join(ROOT, "target", "release", exe), path.join(ROOT, "target", "debug", exe), path.join(__dirname, exe)].filter(Boolean);
+  const candidates = [process.env.CUTKIT_CLI, path.join(__dirname, exe), path.join(ROOT, "target", "release", exe), path.join(ROOT, "target", "debug", exe)].filter(Boolean);
   return candidates.find((p) => fs.existsSync(p)) || null;
 }
 
@@ -158,6 +171,56 @@ const TOOLS = [
     description: "Isi proyek: aset, track, klip (id, waktu, jenis), dan caption. Pakai id klip dari sini untuk edit.",
     inputSchema: { type: "object", required: ["project"], properties: { project: PROJECT } },
     run: async (a) => summary(load(a.project), a.project),
+  },
+  {
+    name: "cutkit_list_media",
+    description: "Melihat isi folder media (video, gambar, audio, caption). Tanpa folder: daftar pustaka bawaan (Meme Templates, Sound Effect Meme) dan folder Video/Gambar/Musik/Unduhan. Berguna untuk mencari meme, SFX, atau bahan video.",
+    inputSchema: { type: "object", properties: { folder: str("Folder yang dilihat"), kind: { type: "string", enum: ["video", "image", "audio", "caption"] }, search: str("Saring nama file (tanpa huruf besar/kecil)"), recursive: bool("Ikut subfolder (maks 500 file)") } },
+    run: async (a) => {
+      if (!a.folder) {
+        const home = os.homedir();
+        const places = [...LIBRARY, ...["Videos", "Pictures", "Music", "Downloads", "Desktop"].map((d) => ({ name: d, path: path.join(home, d) }))];
+        return places.filter((x) => fs.existsSync(x.path));
+      }
+      const exts = a.kind ? MEDIA_EXT[a.kind] : Object.values(MEDIA_EXT).flat();
+      const q = (a.search || "").toLowerCase();
+      const files = [], folders = [];
+      const walk = (dir, depth) => {
+        let entries;
+        try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { if (depth === 0) throw new Error(`Folder tidak bisa dibuka: ${e.message}`); return; }
+        for (const e of entries) {
+          if (files.length >= 500) return;
+          const full = path.join(dir, e.name);
+          if (e.isDirectory()) { if (depth === 0) folders.push(full); if (a.recursive && depth < 4) walk(full, depth + 1); continue; }
+          const ext = path.extname(e.name).slice(1).toLowerCase();
+          if (!exts.includes(ext) || (q && !e.name.toLowerCase().includes(q))) continue;
+          const kind = Object.keys(MEDIA_EXT).find((k) => MEDIA_EXT[k].includes(ext));
+          files.push({ path: full, kind, size_kb: Math.round(fs.statSync(full).size / 1024) });
+        }
+      };
+      walk(a.folder, 0);
+      return { folders, files, truncated: files.length >= 500 };
+    },
+  },
+  {
+    name: "cutkit_preview_frame",
+    description: "Melihat hasil edit: merender frame proyek di detik tertentu persis seperti hasil ekspor (teks, caption, efek, warna) dan mengembalikannya sebagai gambar. Pakai untuk memeriksa susunan sebelum ekspor.",
+    inputSchema: { type: "object", required: ["project"], properties: { project: PROJECT, time: num("Detik di timeline (bawaan 0)"), times: { type: "array", items: { type: "number" }, description: "Beberapa detik sekaligus (maks 6)" }, height: num("Tinggi gambar, bawaan 640") } },
+    run: async (a) => {
+      const times = (a.times && a.times.length ? a.times : [a.time || 0]).slice(0, 6);
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cutkit-frame-"));
+      const content = [];
+      try {
+        for (const [i, t] of times.entries()) {
+          const out = path.join(dir, `f${i}.png`);
+          await cli(["frame", path.resolve(a.project), String(t), out, "--height", String(a.height || 640)]);
+          content.push({ type: "text", text: `Detik ${t}` }, { type: "image", data: fs.readFileSync(out).toString("base64"), mimeType: "image/png" });
+        }
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+      return { content };
+    },
   },
   {
     name: "cutkit_import_media",
@@ -443,10 +506,63 @@ const TOOLS = [
     },
   },
   {
+    name: "cutkit_open_in_app",
+    description: "Membuka proyek di aplikasi CutKit supaya pengguna bisa melihat, memutar, dan merapikan sendiri hasil susunan.",
+    inputSchema: { type: "object", required: ["project"], properties: { project: PROJECT } },
+    run: async (a) => {
+      const exe = [path.join(ROOT, "cutkit-app.exe"), path.join(process.env.LOCALAPPDATA || "", "CutKit", "cutkit-app.exe"), path.join(ROOT, "target", "release", "cutkit-app.exe")].find((p) => fs.existsSync(p));
+      if (!exe) throw new Error("Aplikasi CutKit tidak ditemukan. Pasang dari installer CutKit_x64-setup.exe.");
+      const file = path.resolve(a.project);
+      if (!fs.existsSync(file)) throw new Error(`Proyek tidak ada: ${file}`);
+      spawn(exe, [file], { detached: true, stdio: "ignore", windowsHide: false }).unref();
+      return { opened: file, app: exe };
+    },
+  },
+  {
     name: "cutkit_download_model",
     description: "Mengunduh model AI CutKit (cek id lewat cutkit_status): whisper-base/small/medium, piper-engine, piper-id, piper-id-config, matting-fast, matting-best, vad-silero.",
     inputSchema: { type: "object", required: ["id"], properties: { id: str("Id model") } },
     run: async (a, progress) => cli(["download", a.id], (pct) => progress && progress(pct / 100)),
+  },
+];
+
+/* ---------- prompt siap pakai (muncul sebagai menu atau perintah / di klien MCP) ---------- */
+
+const PROMPTS = [
+  {
+    name: "buat_shorts",
+    title: "Buat Shorts dari folder",
+    description: "Menyusun video Shorts 9:16 dari folder berisi voice over, gambar/klip, musik, dan caption, lalu mengekspornya.",
+    arguments: [{ name: "folder", description: "Folder bahan", required: true }, { name: "gaya", description: "Gaya caption: kuning, hijau, kotak" }],
+    text: (a) => `Buat video Shorts 9:16 dengan CutKit dari bahan di folder "${a.folder}".
+1. Lihat isi folder dengan cutkit_list_media. Tentukan voice over (audio terpanjang), visual (gambar/video, urut nama), musik latar bila ada, dan file caption (.srt/.json) bila ada.
+2. Buat proyek "${path.join(a.folder || "", "Shorts.cutkit.json")}" dengan cutkit_new_project (9:16), lalu cutkit_quick_video dengan caption_style "${a.gaya || "kuning"}".
+3. Bila tidak ada file caption tapi ada voice over, jalankan cutkit_captions_from_audio.
+4. Periksa hasil dengan cutkit_preview_frame di beberapa detik (awal, tengah, akhir) dan perbaiki bila ada yang janggal.
+5. Ekspor ke "${path.join(a.folder || "", "Shorts.mp4")}" dengan cutkit_export, lalu laporkan durasi dan lokasi file.`,
+  },
+  {
+    name: "caption_otomatis",
+    title: "Caption otomatis untuk video",
+    description: "Memberi caption kata-per-kata dari suara pada video yang sudah ada, lalu mengekspor versi bercaption.",
+    arguments: [{ name: "video", description: "File video", required: true }, { name: "rasio", description: "9:16, 16:9, atau 1:1 (bawaan mengikuti video)" }],
+    text: (a) => `Beri caption otomatis pada video "${a.video}" dengan CutKit.
+1. Buat proyek di samping video (nama sama, akhiran .cutkit.json) dengan rasio ${a.rasio || "yang paling cocok dengan ukuran video (cek dulu dengan cutkit_import_media)"}.
+2. Tambahkan video dengan cutkit_add_clip (track main, fit cover untuk 9:16).
+3. Jalankan cutkit_captions_from_audio (model whisper-small, bahasa id) dan pilih gaya yang cocok (youtube untuk 16:9, kuning untuk 9:16).
+4. Cek 2-3 frame dengan cutkit_preview_frame, lalu ekspor ke file baru berakhiran "-caption.mp4".`,
+  },
+  {
+    name: "video_dari_naskah",
+    title: "Video dari naskah (TTS)",
+    description: "Naskah dibacakan TTS Bahasa Indonesia, diberi gambar dan caption, lalu diekspor.",
+    arguments: [{ name: "naskah", description: "Isi naskah", required: true }, { name: "folder_gambar", description: "Folder gambar/klip", required: true }],
+    text: (a) => `Buat video dari naskah berikut dengan CutKit:
+"""${a.naskah}"""
+1. Buat proyek 9:16 di "${path.join(a.folder_gambar || "", "Naskah.cutkit.json")}".
+2. Jadikan naskah suara dengan cutkit_tts (caption ikut dibuat).
+3. Lihat gambar di "${a.folder_gambar}" dengan cutkit_list_media, lalu tempatkan berurutan di track main dengan cutkit_add_clip sehingga total durasinya sama dengan suara (bagi rata, motion zoom-in).
+4. Cek dengan cutkit_preview_frame lalu ekspor dengan cutkit_export.`,
   },
 ];
 
@@ -475,10 +591,16 @@ async function handle(msg) {
   if (method === "initialize") {
     return send({ jsonrpc: "2.0", id, result: {
       protocolVersion: (params && params.protocolVersion) || "2025-06-18",
-      capabilities: { tools: {} },
+      capabilities: { tools: {}, prompts: {} },
       serverInfo: { name: "cutkit", version: VERSION },
-      instructions: "CutKit: editor video lokal. Alur umum: cutkit_new_project -> cutkit_quick_video (atau cutkit_add_clip/add_text/add_effect) -> cutkit_captions_from_audio -> cutkit_export. Proyek bisa dibuka juga di aplikasi CutKit.",
+      instructions: "CutKit: editor video lokal. Alur umum: cutkit_new_project -> cutkit_quick_video (atau cutkit_add_clip/add_text/add_effect) -> cutkit_captions_from_audio -> cutkit_preview_frame (lihat hasilnya) -> cutkit_export. Cari bahan dengan cutkit_list_media. Waktu dalam detik; posisi x/y dalam piksel kanvas dari tengah. Proyek .cutkit.json bisa dibuka dan dirapikan di aplikasi CutKit.",
     } });
+  }
+  if (method === "prompts/list") return send({ jsonrpc: "2.0", id, result: { prompts: PROMPTS.map(({ name, title, description, arguments: args }) => ({ name, title, description, arguments: args })) } });
+  if (method === "prompts/get") {
+    const pr = PROMPTS.find((x) => x.name === params.name);
+    if (!pr) return send({ jsonrpc: "2.0", id, error: { code: -32602, message: `Prompt tidak dikenal: ${params.name}` } });
+    return send({ jsonrpc: "2.0", id, result: { description: pr.description, messages: [{ role: "user", content: { type: "text", text: pr.text(params.arguments || {}) } }] } });
   }
   if (method === "ping") return send({ jsonrpc: "2.0", id, result: {} });
   if (method === "tools/list") return send({ jsonrpc: "2.0", id, result: { tools: TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) } });
@@ -489,6 +611,7 @@ async function handle(msg) {
     const progress = token != null ? (frac) => send({ jsonrpc: "2.0", method: "notifications/progress", params: { progressToken: token, progress: Math.round(frac * 1000) / 10, total: 100 } }) : null;
     try {
       const result = await tool.run(params.arguments || {}, progress);
+      if (result && Array.isArray(result.content)) return send({ jsonrpc: "2.0", id, result: { content: result.content } });
       return send({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] } });
     } catch (e) {
       return send({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text: `Gagal: ${e.message}` }], isError: true } });
