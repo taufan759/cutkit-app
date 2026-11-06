@@ -208,6 +208,19 @@ fn write_atomic(path: &Path, text: &str) -> Result<(), String> {
     std::fs::rename(&tmp, path).map_err(|e| format!("Gagal menyimpan: {e}"))
 }
 
+/// Menulis data biner (base64, boleh berupa data URL) ke file, mis. stiker PNG hasil render.
+#[tauri::command]
+fn write_binary(path: String, data: String) -> Result<(), String> {
+    use base64::Engine;
+    let b64 = data.split_once(',').map(|(_, d)| d).unwrap_or(&data);
+    let bytes = base64::engine::general_purpose::STANDARD.decode(b64.trim()).map_err(|e| format!("Data tidak valid: {e}"))?;
+    let p = Path::new(&path);
+    if let Some(dir) = p.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(p, bytes).map_err(|e| format!("Gagal menyimpan: {e}"))
+}
+
 /// Untuk ekspor caption (.srt / JSON kata).
 #[tauri::command]
 fn write_text(path: String, text: String) -> Result<(), String> {
@@ -520,6 +533,7 @@ fn main() {
             save_project,
             read_text,
             write_text,
+            write_binary,
             list_dir,
             path_exists,
             export_start,

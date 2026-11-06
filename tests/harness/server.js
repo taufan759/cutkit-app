@@ -69,6 +69,7 @@ const commands = {
   save_project: ({ path: p, project }) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, JSON.stringify(project, null, 2)); return null; },
   read_text: ({ path: p }) => fs.readFileSync(p, "utf8").replace(/^﻿/, ""),
   write_text: ({ path: p, text }) => { fs.writeFileSync(p, text); return null; },
+  write_binary: ({ path: p, data }) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, Buffer.from(data.replace(/^data:[^,]+,/, ""), "base64")); return null; },
   write_base64: ({ path: p, data }) => { fs.writeFileSync(p, Buffer.from(data.replace(/^data:[^,]+,/, ""), "base64")); return null; },
   list_dir: ({ path: p }) => fs.readdirSync(p, { withFileTypes: true })
     .filter((d) => d.isDirectory() || /\.(mp4|mov|mkv|webm|gif|png|jpe?g|webp|bmp|mp3|wav|m4a|ogg|flac|srt|json)$/i.test(d.name))

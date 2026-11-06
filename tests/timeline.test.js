@@ -390,3 +390,15 @@ test("efek: klip efek di track Efek paling atas, tidak menerima transisi", () =>
   assert.equal(e.duration, 3, "efek bisa diperpanjang bebas");
   assert.equal(T.EFFECTS.length, 10);
 });
+
+test("trackFor: teks tidak masuk track utama, overlay baru di bawah track Efek", () => {
+  const p = T.newProject();
+  T.effectTrack(p);
+  T.insertClip(p, "v2", T.textClip("A"), 0);
+  const tr = T.trackFor(p, T.textClip("B"), 1);
+  assert.notEqual(tr.id, "v1", "bukan track utama");
+  assert.notEqual(tr.role, "effects");
+  const fxIndex = p.tracks.findIndex((t) => t.role === "effects");
+  assert.ok(p.tracks.indexOf(tr) < fxIndex, "track baru di bawah track Efek");
+  assert.equal(T.trackFor(p, T.effectClip("bw"), 0).role, "effects");
+});

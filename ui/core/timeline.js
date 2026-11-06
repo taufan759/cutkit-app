@@ -263,7 +263,7 @@
     if (kind === "video") {
       // Track video baru masuk tepat di atas track video teratas (sebelum track audio).
       let last = -1;
-      p.tracks.forEach((t, i) => { if (t.kind === "video") last = i; });
+      p.tracks.forEach((t, i) => { if (t.kind === "video" && t.role !== "effects") last = i; });
       p.tracks.splice(last + 1, 0, track);
     } else {
       p.tracks.push(track);
@@ -359,11 +359,24 @@
     const fits = (t) => trackAccepts(t, clip) && !overlaps(t, start, start + clip.duration, clip.id);
     const pref = preferId && getTrack(p, preferId);
     if (pref && fits(pref)) return pref;
-    const candidates = p.tracks.filter((t) => trackAccepts(t, clip));
-    // Overlay (gambar/teks) lebih suka track di atas video utama.
-    const ordered = clip.kind === "audio" ? candidates : candidates.slice(1).concat(candidates.slice(0, 1));
+    // Track efek hanya untuk klip efek; teks tidak pernah masuk track utama.
+    const candidates = p.tracks.filter((t) => trackAccepts(t, clip) && (t.role === "effects") === (clip.kind === "effect"));
+    const main = p.tracks.find((t) => t.kind === "video" && t.role !== "effects");
+    let ordered = candidates;
+    if (clip.kind !== "audio") {
+      // Overlay (gambar/teks) lebih suka track di atas video utama.
+      ordered = candidates.filter((t) => t !== main);
+      if (clip.kind !== "text" && clip.kind !== "effect" && main && candidates.includes(main)) ordered.push(main);
+    }
     const t = ordered.find(fits);
-    return t || addTrack(p, clip.kind === "audio" ? "audio" : "video");
+    if (t) return t;
+    if (clip.kind === "effect") return effectTrack(p);
+    const nt = addTrack(p, clip.kind === "audio" ? "audio" : "video");
+    // Track video baru untuk overlay ditaruh di bawah track Efek.
+    const fx = p.tracks.findIndex((x) => x.role === "effects");
+    const ni = p.tracks.indexOf(nt);
+    if (fx >= 0 && ni > fx) { p.tracks.splice(ni, 1); p.tracks.splice(fx, 0, nt); }
+    return nt;
   }
 
   function round(v) { return Math.round(v * 1e6) / 1e6; }

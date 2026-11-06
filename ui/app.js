@@ -787,6 +787,10 @@ const TEXT_PRESETS = [
   { name: "Merah", text: "FAKTA", y: -400, style: { font: "Impact", size: 110, color: "#ff3b3b", outline_color: "#ffffff", outline: 6 } },
   { name: "Subjudul", text: "Subjudul di sini", y: 300, style: { font: "Segoe UI", bold: true, size: 64, color: "#ffffff", outline: 3, shadow: 3 } },
   { name: "Kotak kuning", text: "PENTING", y: -500, style: { font: "Arial Black", size: 80, color: "#111111", outline: 14, background: "#ffe600" } },
+  { name: "SUBSCRIBE", text: "SUBSCRIBE", y: 650, style: { font: "Arial Black", size: 76, color: "#ffffff", outline: 18, background: "#e5322d" } },
+  { name: "Tonton sampai habis", text: "TONTON SAMPAI HABIS!", y: 520, style: { font: "Impact", size: 84, color: "#ffe600", outline_color: "#000000", outline: 7 } },
+  { name: "Bagian 2", text: "BAGIAN 2 ➜", y: 600, style: { font: "Segoe UI", bold: true, size: 72, color: "#000000", outline: 16, background: "#ffffffe6" } },
+  { name: "Tanda tanya", text: "???", y: -300, style: { font: "Impact", size: 160, color: "#ff3b3b", outline_color: "#ffffff", outline: 8 } },
 ];
 
 function renderTextPresets() {
@@ -837,6 +841,44 @@ function renderFxPanel() {
   if (window.renderStickerSection) sections.push(...window.renderStickerSection());
   panel.replaceChildren(...sections);
 }
+
+/* ---------- stiker emoji (Twemoji, CC-BY 4.0) ---------- */
+
+const STICKERS = "1f602 1f923 1f62d 1f631 1f525 1f480 1f440 1f914 1f60e 1f621 1f972 1f633 1f64f 1f44d 1f44e 2764 1f4af 26a0 274c 2705 2753 2757 1f449 1f446 1f447 2b50 1f4a5 1f389 1f92f 1f634 1f921 1f5ff 1f410 1f4c8 1f4c9 1f4b0 1f9e0 1f451 1f6a8 23f0 1f4cc 1f3af 1f92b 1f60f 1f644 1f62c 1f976 1f44f".split(" ");
+
+/** SVG stiker dirender jadi PNG 512 px di folder proyek, lalu ditaruh sebagai overlay di playhead. */
+async function addSticker(code) {
+  try {
+    let base;
+    if (state.path) base = dirName(state.path);
+    else { try { base = joinPath(await tauri.path.documentDir(), "CutKit"); } catch { base = "C:\\CutKit"; } }
+    const out = joinPath(joinPath(base, "stiker"), `${code}.png`);
+    const exists = await invoke("path_exists", { path: out }).catch(() => false);
+    if (!exists) {
+      const img = new Image();
+      img.src = `stickers/${code}.svg`;
+      await img.decode();
+      const c = document.createElement("canvas");
+      c.width = 512; c.height = 512;
+      c.getContext("2d").drawImage(img, 0, 0, 512, 512);
+      await invoke("write_binary", { path: out, data: c.toDataURL("image/png") });
+    }
+    const [asset] = await importPaths([out]);
+    if (!asset) return;
+    commit((p) => {
+      const clip = TL.clipFromAsset(asset, { transform: { scale: 0.22 }, duration: 2 });
+      const track = TL.trackFor(p, clip, preview.time, p.tracks.find((t) => t.kind === "video" && t !== p.tracks[0] && t.role !== "effects")?.id);
+      TL.insertClip(p, track.id, clip, preview.time);
+      state.selected = clip.id;
+    });
+  } catch (e) { toast(errMsg(e), true); }
+}
+
+window.renderStickerSection = () => [
+  el("h4", { class: "panel-h" }, "Stiker"),
+  el("div", { class: "sticker-grid" }, STICKERS.map((code) => el("button", { class: "sticker", title: "Tambah stiker di playhead", onclick: () => addSticker(code) }, el("img", { src: `stickers/${code}.svg`, alt: "", loading: "lazy" })))),
+  el("p", { class: "hint" }, "Emoji Twemoji © Twitter, Inc. dan kontributor, lisensi CC-BY 4.0."),
+];
 
 /* ---------- ketukan musik ---------- */
 
