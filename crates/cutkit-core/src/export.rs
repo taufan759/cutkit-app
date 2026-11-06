@@ -37,7 +37,12 @@ pub struct ExportOptions {
     pub output: String,
     pub encoder: Encoder,
     pub quality: Quality,
+    /// Ratakan kerasnya suara ke -14 LUFS (patokan YouTube) dengan loudnorm.
+    pub normalize_loudness: bool,
 }
+
+/// Target loudness YouTube: -14 LUFS, puncak -1.5 dBTP.
+pub const LOUDNORM: &str = "loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000";
 
 #[derive(Debug, Clone)]
 pub struct ExportPlan {
@@ -243,8 +248,9 @@ pub fn build_plan(project: &Project, opts: &ExportOptions) -> Result<ExportPlan,
         None => g.push(format!("{last}format={final_fmt}[vout]")),
     }
 
+    let mix_out = if opts.normalize_loudness { "[amix]" } else { "[aout]" };
     if audios.is_empty() {
-        g.push("[1:a]anull[aout]".into());
+        g.push(format!("[1:a]anull{mix_out}"));
     } else {
         let mut labels = String::from("[1:a]");
         for (i, a) in audios.iter().enumerate() {
@@ -272,7 +278,10 @@ pub fn build_plan(project: &Project, opts: &ExportOptions) -> Result<ExportPlan,
             g.push(chain);
             labels.push_str(&format!("[a{i}]"));
         }
-        g.push(format!("{labels}amix=inputs={}:normalize=0:duration=first:dropout_transition=0[aout]", audios.len() + 1));
+        g.push(format!("{labels}amix=inputs={}:normalize=0:duration=first:dropout_transition=0{mix_out}", audios.len() + 1));
+    }
+    if opts.normalize_loudness {
+        g.push(format!("[amix]{LOUDNORM}[aout]"));
     }
     let filter_script = g.join(";\n") + "\n";
 
@@ -431,6 +440,15 @@ mod tests {
         assert_eq!(lines[3], "[b0][l0]overlay=x=0:y=0:format=rgb:eof_action=pass:enable='between(t,0,4)'[k0];");
         assert!(lines[4].starts_with("[s0]format=rgba,scale=1080:608,"));
         assert!(lines[5].starts_with("[k0][v0]overlay=x=0:y=656:"));
+    }
+
+    #[test]
+    fn loudness_normalization_is_last_audio_step() {
+        let plan = build_plan(&project(), &ExportOptions { normalize_loudness: true, ..opts() }).unwrap();
+        let lines: Vec<&str> = plan.filter_script.lines().collect();
+        assert!(lines[lines.len() - 2].ends_with("dropout_transition=0[amix];"));
+        assert_eq!(lines[lines.len() - 1], "[amix]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[aout]");
+        assert!(!build_plan(&project(), &opts()).unwrap().filter_script.contains("loudnorm"));
     }
 
     #[test]

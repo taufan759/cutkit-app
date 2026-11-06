@@ -1495,6 +1495,7 @@ function exportDialog() {
   let folder = localStorage.getItem("cutkit.exportdir") || (state.path ? dirName(state.path) : "");
   let quality = localStorage.getItem("cutkit.quality") || "balanced";
   let encoder = state.tools && state.tools.has_qsv ? localStorage.getItem("cutkit.encoder") || "x264" : "x264";
+  const loud = el("input", { type: "checkbox", checked: localStorage.getItem("cutkit.loudnorm") !== "0" });
   const name = el("input", { type: "text", value: `${safeName(p.name)}.mp4` });
   const folderInput = el("input", { type: "text", value: folder });
   const pick = async () => {
@@ -1515,7 +1516,8 @@ function exportDialog() {
     localStorage.setItem("cutkit.exportdir", folder);
     localStorage.setItem("cutkit.quality", quality);
     localStorage.setItem("cutkit.encoder", encoder);
-    runExport({ output, quality, encoder });
+    localStorage.setItem("cutkit.loudnorm", loud.checked ? "1" : "0");
+    runExport({ output, quality, encoder, normalize_loudness: loud.checked });
   };
   openModal(el("h2", {}, "Ekspor video"),
     el("div", { class: "export-info" },
@@ -1527,6 +1529,7 @@ function exportDialog() {
     field("Folder", el("div", { class: "ctl" }, folderInput, el("button", { class: "btn", onclick: pick }, "Pilih…"))),
     field("Kualitas", segmented([["fast", "Cepat"], ["balanced", "Seimbang"], ["best", "Terbaik"]], quality, (v) => { quality = v; })),
     field("Encoder", segmented(encChoices, encoder, (v) => { encoder = v; })),
+    field("Suara", el("label", { class: "check" }, loud, "Ratakan volume ke −14 LUFS (standar YouTube)")),
     state.tools && !state.tools.has_qsv ? el("p", { class: "hint" }, "Intel Quick Sync tidak terdeteksi; memakai CPU.") : null,
     el("div", { class: "modal-actions" },
       el("button", { class: "btn", onclick: closeModal }, "Batal"),
