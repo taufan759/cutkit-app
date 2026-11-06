@@ -100,6 +100,7 @@
     c.transform = Object.assign(defaultTransform(), c.transform || {});
     c.motion = Object.assign({ kind: "none", amount: 0.15 }, c.motion || {});
     c.background = c.background === "blur" ? "blur" : "none";
+    c.chroma = Object.assign({ enabled: false, color: "#00ff00", similarity: 0.3, blend: 0.1 }, c.chroma || {});
     if (c.kind === "text") {
       c.text = c.text || { text: "", style: defaultTextStyle() };
       c.text.style = Object.assign(defaultTextStyle(), c.text.style || {});
@@ -397,6 +398,7 @@
     for (const [k, v] of Object.entries(patch)) {
       if (k === "transform") Object.assign(clip.transform, v);
       else if (k === "motion") Object.assign(clip.motion, v);
+      else if (k === "chroma") Object.assign(clip.chroma, v);
       else if (k === "text") {
         clip.text = clip.text || { text: "", style: defaultTextStyle() };
         if (v.text != null) clip.text.text = v.text;

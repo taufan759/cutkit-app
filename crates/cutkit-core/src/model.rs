@@ -119,6 +119,8 @@ pub struct Clip {
     pub motion: Motion,
     /// Latar di belakang klip yang tidak memenuhi kanvas: "none" atau "blur" (klip yang sama, diperbesar dan diburamkan).
     pub background: String,
+    /// Hapus warna latar (green screen).
+    pub chroma: Chroma,
     pub text: Option<TextClip>,
 }
 
@@ -140,6 +142,7 @@ impl Default for Clip {
             transform: Transform::default(),
             motion: Motion::default(),
             background: "none".into(),
+            chroma: Chroma::default(),
             text: None,
         }
     }
@@ -180,6 +183,23 @@ pub struct Transform {
 impl Default for Transform {
     fn default() -> Self {
         Transform { x: 0.0, y: 0.0, scale: 1.0, rotation: 0.0, opacity: 1.0 }
+    }
+}
+
+/// Chroma key: piksel yang jaraknya ke `color` di bawah `similarity` jadi transparan,
+/// dengan peralihan halus selebar `blend` (sama seperti filter colorkey ffmpeg).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct Chroma {
+    pub enabled: bool,
+    pub color: String,
+    pub similarity: f64,
+    pub blend: f64,
+}
+
+impl Default for Chroma {
+    fn default() -> Self {
+        Chroma { enabled: false, color: "#00ff00".into(), similarity: 0.3, blend: 0.1 }
     }
 }
 

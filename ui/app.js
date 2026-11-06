@@ -1046,6 +1046,16 @@ function renderInspector() {
   }
 
   if (c.kind === "video" || c.kind === "image") {
+    const ch = c.chroma;
+    sections.push(el("section", {},
+      el("h4", {}, "Hapus latar (chroma key)"),
+      el("label", { class: "check" }, el("input", { type: "checkbox", checked: ch.enabled, onchange: (e) => commit((pp) => TL.updateClip(pp, c.id, { chroma: { enabled: e.target.checked } })) }), "Hapus warna latar green screen"),
+      ch.enabled ? field("Warna", el("div", { class: "ctl" },
+        colorInput(ch.color, (v) => upd({ chroma: { color: v } })),
+        el("button", { class: "btn small", onclick: () => commit((pp) => TL.updateClip(pp, c.id, { chroma: { color: "#00ff00" } })) }, "Hijau"),
+        el("button", { class: "btn small", onclick: () => commit((pp) => TL.updateClip(pp, c.id, { chroma: { color: "#0047bb" } })) }, "Biru"))) : null,
+      ch.enabled ? slider("Kemiripan", ch.similarity, { min: 1, max: 80, unit: "%", fromModel: (v) => v * 100, toModel: (v) => v / 100, apply: (v) => upd({ chroma: { similarity: v } }) }) : null,
+      ch.enabled ? slider("Kehalusan", ch.blend, { min: 0, max: 50, unit: "%", fromModel: (v) => v * 100, toModel: (v) => v / 100, apply: (v) => upd({ chroma: { blend: v } }) }) : null));
     const MOTION_LABELS = [["none", "Diam"], ["zoom-in", "Zoom masuk"], ["zoom-out", "Zoom keluar"], ["pan-left", "Geser ←"], ["pan-right", "Geser →"], ["pan-up", "Geser ↑"], ["pan-down", "Geser ↓"]];
     sections.push(el("section", {},
       el("h4", {}, "Gerak (Ken Burns)"),

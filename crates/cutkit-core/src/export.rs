@@ -57,6 +57,8 @@ pub struct ExportPlan {
 struct Visual {
     input: usize,
     blur_bg: bool,
+    /// Argumen colorkey (warna:similarity:blend) bila chroma key aktif.
+    colorkey: Option<String>,
     speed: f64,
     motion: Option<(Motion, u64)>,
     start: f64,
@@ -167,7 +169,11 @@ pub fn build_plan(project: &Project, opts: &ExportOptions) -> Result<ExportPlan,
             if want_video {
                 let pl = place(w, h, asset.width, asset.height, clip.fit, &clip.transform);
                 let motion = clip.motion.is_active().then(|| (clip.motion.clone(), (clip.source_duration() * fps).round().max(1.0) as u64));
-                visuals.push(Visual { input, blur_bg: clip.background == "blur", speed: clip.effective_speed(), motion, start: clip.start, end: clip.end(), place: pl, opacity: clip.transform.opacity.clamp(0.0, 1.0) });
+                let colorkey = clip.chroma.enabled.then(|| {
+                    let (r, g, b, _) = crate::ass::parse_color(&clip.chroma.color);
+                    format!("0x{r:02x}{g:02x}{b:02x}:{}:{}", f(clip.chroma.similarity.clamp(0.01, 1.0)), f(clip.chroma.blend.clamp(0.0, 1.0)))
+                });
+                visuals.push(Visual { input, blur_bg: clip.background == "blur", colorkey, speed: clip.effective_speed(), motion, start: clip.start, end: clip.end(), place: pl, opacity: clip.transform.opacity.clamp(0.0, 1.0) });
             }
             if want_audio {
                 audios.push(AudioSrc {
@@ -205,6 +211,8 @@ pub fn build_plan(project: &Project, opts: &ExportOptions) -> Result<ExportPlan,
             base = format!("[k{i}]");
             src = format!("[s{i}]");
         }
+        // Chroma key dikerjakan pada resolusi asli sebelum diskalakan.
+        let key = v.colorkey.as_ref().map(|k| format!(",colorkey={k}")).unwrap_or_default();
         let mut chain = match &v.motion {
             // Diperbesar 2x dulu supaya pembulatan posisi zoompan tidak membuat gambar bergetar.
             Some((m, frames)) => {
@@ -212,7 +220,7 @@ pub fn build_plan(project: &Project, opts: &ExportOptions) -> Result<ExportPlan,
                 // Faktor dibatasi agar sisi terpanjang <= 4096 px (klip besar tetap ringan di laptop).
                 let k = (4096.0 / p.w.max(p.h) as f64).clamp(1.0, 2.0);
                 format!(
-                    "{src}format=rgba,fps={},scale={}:{},zoompan=z='{z}':x='{x}':y='{y}':d=1:s={}x{}:fps={}",
+                    "{src}format=rgba{key},fps={},scale={}:{},zoompan=z='{z}':x='{x}':y='{y}':d=1:s={}x{}:fps={}",
                     f(fps),
                     (p.w as f64 * k).round() as u32,
                     (p.h as f64 * k).round() as u32,
@@ -221,7 +229,7 @@ pub fn build_plan(project: &Project, opts: &ExportOptions) -> Result<ExportPlan,
                     f(fps)
                 )
             }
-            None => format!("{src}format=rgba,scale={}:{}", p.w, p.h),
+            None => format!("{src}format=rgba{key},scale={}:{}", p.w, p.h),
         };
         if p.radians.abs() > 1e-9 {
             chain.push_str(&format!(",rotate={}:ow={}:oh={}:c=0x00000000", f(p.radians), p.ow, p.oh));
@@ -449,6 +457,14 @@ mod tests {
         assert!(lines[lines.len() - 2].ends_with("dropout_transition=0[amix];"));
         assert_eq!(lines[lines.len() - 1], "[amix]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[aout]");
         assert!(!build_plan(&project(), &opts()).unwrap().filter_script.contains("loudnorm"));
+    }
+
+    #[test]
+    fn chroma_key_runs_before_scaling() {
+        let mut p = project();
+        p.tracks[1].clips[0].chroma = Chroma { enabled: true, color: "#00FF00".into(), similarity: 0.25, blend: 0.05 };
+        let g = build_plan(&p, &opts()).unwrap().filter_script;
+        assert!(g.contains("[3:v]format=rgba,colorkey=0x00ff00:0.25:0.05,scale=432:346,"), "{g}");
     }
 
     #[test]

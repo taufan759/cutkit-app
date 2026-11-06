@@ -80,5 +80,28 @@
     return [(srcW - sw) * px, (srcH - sh) * py, sw, sh];
   }
 
-  return { place, hitTest, corners, rround, motionAt, motionActive, motionRect, MOTIONS };
+  /**
+   * Chroma key pada data RGBA (Uint8ClampedArray), rumus sama dengan filter colorkey ffmpeg:
+   * jarak warna ternormalisasi, transparan di bawah similarity, peralihan selebar blend.
+   */
+  function colorKey(data, rgb, similarity, blend) {
+    const [kr, kg, kb] = rgb;
+    const norm = 255 * 255 * 3;
+    for (let i = 0; i < data.length; i += 4) {
+      const dr = data[i] - kr;
+      const dg = data[i + 1] - kg;
+      const db = data[i + 2] - kb;
+      const diff = Math.sqrt((dr * dr + dg * dg + db * db) / norm);
+      const a = blend > 0.0001 ? Math.min(1, Math.max(0, (diff - similarity) / blend)) * 255 : diff > similarity ? 255 : 0;
+      if (a < data[i + 3]) data[i + 3] = a;
+    }
+    return data;
+  }
+
+  function hexToRgb(hex) {
+    const h = String(hex || "").replace("#", "");
+    return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) || 0);
+  }
+
+  return { place, hitTest, corners, rround, motionAt, motionActive, motionRect, MOTIONS, colorKey, hexToRgb };
 });

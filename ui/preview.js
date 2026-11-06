@@ -167,6 +167,37 @@
 
     get project() { return this.host.project(); }
 
+    /**
+     * Versi klip yang latar hijaunya sudah dihapus, di canvas kecil seukuran tampilan.
+     * Di-cache per klip selama frame sumber dan pengaturannya sama.
+     */
+    _keyed(clip, source, pl, k) {
+      const sw = source.videoWidth || source.naturalWidth;
+      const sh = source.videoHeight || source.naturalHeight;
+      if (!sw || !sh) return source;
+      const ch = clip.chroma;
+      const w = Math.max(2, Math.min(sw, Math.round(pl.w * k * 1.5)));
+      const h = Math.max(2, Math.round((w * sh) / sw));
+      const key = `${source.currentTime || 0}|${ch.color}|${ch.similarity}|${ch.blend}|${w}`;
+      this.keyCache = this.keyCache || new Map();
+      let e = this.keyCache.get(clip.id);
+      if (e && e.key === key) return e.canvas;
+      if (!e) {
+        const canvas = document.createElement("canvas");
+        e = { canvas, ctx: canvas.getContext("2d", { willReadFrequently: true }) };
+        this.keyCache.set(clip.id, e);
+      }
+      e.canvas.width = w;
+      e.canvas.height = h;
+      e.ctx.clearRect(0, 0, w, h);
+      e.ctx.drawImage(source, 0, 0, w, h);
+      const img = e.ctx.getImageData(0, 0, w, h);
+      GEO.colorKey(img.data, GEO.hexToRgb(ch.color), ch.similarity, ch.blend);
+      e.ctx.putImageData(img, 0, 0);
+      e.key = key;
+      return e.canvas;
+    }
+
     /** Menyesuaikan resolusi internal kanvas dengan ukuran tampil. */
     resize(displayW, displayH) {
       const p = this.project;
@@ -367,13 +398,14 @@
             ctx.drawImage(source, (p.canvas.width - sw * s) / 2, (p.canvas.height - sh * s) / 2, sw * s, sh * s);
             ctx.restore();
           }
+          if (source && clip.chroma && clip.chroma.enabled) source = this._keyed(clip, source, pl, k);
           ctx.save();
           ctx.globalAlpha = Math.max(0, Math.min(1, clip.transform.opacity));
           ctx.translate(pl.cx, pl.cy);
           ctx.rotate(pl.rad);
           if (source && GEO.motionActive(clip.motion)) {
-            const sw = source.videoWidth || source.naturalWidth || pl.w;
-            const sh = source.videoHeight || source.naturalHeight || pl.h;
+            const sw = source.videoWidth || source.naturalWidth || source.width || pl.w;
+            const sh = source.videoHeight || source.naturalHeight || source.height || pl.h;
             const [sx, sy, rw, rh] = GEO.motionRect(clip.motion, (t - clip.start) / clip.duration, sw, sh);
             ctx.drawImage(source, sx, sy, rw, rh, -pl.w / 2, -pl.h / 2, pl.w, pl.h);
           } else if (source) ctx.drawImage(source, -pl.w / 2, -pl.h / 2, pl.w, pl.h);

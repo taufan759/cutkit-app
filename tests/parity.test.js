@@ -30,3 +30,15 @@ test("penempatan klip sama dengan Rust", () => {
     assert.deepEqual([p.w, p.h, p.ow, p.oh, p.x, p.y], c.out, JSON.stringify(c));
   }
 });
+
+test("chroma key mengikuti rumus colorkey ffmpeg", () => {
+  // hijau murni -> transparan; merah -> utuh; warna di zona peralihan -> setengah
+  const px = new Uint8ClampedArray([0, 255, 0, 255, 255, 0, 0, 255, 0, 160, 0, 255, 0, 255, 0, 100]);
+  geometry.colorKey(px, [0, 255, 0], 0.2, 0.1);
+  assert.equal(px[3], 0);
+  assert.equal(px[7], 255);
+  // jarak (0,160,0) ke (0,255,0) = 95/sqrt(3*255^2) = 0.2151 -> (0.2151-0.2)/0.1 = 0.151 -> 38
+  assert.equal(px[11], 38);
+  assert.equal(px[15], 0, "alpha asli tidak pernah dinaikkan");
+  assert.deepEqual(geometry.hexToRgb("#0047bb"), [0, 71, 187]);
+});
