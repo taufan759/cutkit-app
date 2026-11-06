@@ -247,7 +247,7 @@ function syncProjectControls() {
   $("#project-name").value = state.project.name;
   const c = state.project.canvas;
   const ratio = Object.entries(TL.RATIOS).find(([, [w, h]]) => w === c.width && h === c.height);
-  $("#ratio-select").value = ratio ? ratio[0] : "9:16";
+  $("#ratio-select").value = ratio ? ratio[0] : c.width > c.height ? "16:9" : "9:16";
   resizePreview();
 }
 
@@ -286,7 +286,7 @@ function welcome() {
     el("h2", {}, "Selamat datang di CutKit"),
     el("p", { class: "hint" }, "Editor video ringan untuk Shorts 9:16. Semua diproses di komputermu dengan ffmpeg."),
     el("div", { class: "big-actions" },
-      el("button", { class: "btn primary", onclick: () => quickDialog({ fromWelcome: true }) }, "⚡ Buat Shorts cepat", el("small", {}, "dari voice over + gambar")),
+      el("button", { class: "btn primary", onclick: () => quickDialog({ fromWelcome: true }) }, "⚡ Buat video cepat", el("small", {}, "Shorts atau YouTube, dari voice over + gambar")),
       el("button", { class: "btn", onclick: newProjectDialog }, "＋ Proyek kosong", el("small", {}, "susun sendiri dari awal")),
       el("button", { class: "btn", onclick: openProjectDialog }, "📂 Buka proyek", el("small", {}, "file .cutkit.json")),
       el("button", { class: "btn", id: "demo-btn", onclick: () => demoProject() }, "🎬 Coba contoh", el("small", {}, "proyek latihan siap putar"))),
@@ -306,7 +306,7 @@ async function newProjectDialog() {
   name.addEventListener("input", updateFolder);
   updateFolder();
   let ratio = "9:16";
-  const ratioSeg = segmented(Object.keys(TL.RATIOS).map((r) => [r, r]), ratio, (v) => { ratio = v; });
+  const ratioSeg = el("select", { onchange: (e) => { ratio = e.target.value; } }, Object.keys(TL.RATIOS).map((r) => el("option", { value: r, selected: r === ratio }, TL.RATIO_LABELS[r])));
   const fps = el("select", {}, [24, 25, 30, 60].map((f) => el("option", { value: f, selected: f === 30 }, `${f} fps`)));
   const pick = async () => {
     const dir = await tauri.dialog.open({ directory: true, defaultPath: parent });
@@ -326,7 +326,7 @@ async function newProjectDialog() {
   };
   openModal(el("h2", {}, "Proyek baru"),
     field("Nama", name),
-    field("Rasio", ratioSeg),
+    field("Ukuran", ratioSeg),
     field("Frame rate", fps),
     field("Folder", el("div", { class: "ctl" }, folder, el("button", { class: "btn", onclick: pick }, "Pilih…"))),
     el("p", { class: "hint" }, "Proyek disimpan sebagai file JSON di folder ini dan tersimpan otomatis."),
@@ -500,7 +500,12 @@ function addAssetToTimeline(asset, opt = {}) {
 
 function addText(preset) {
   commit((p) => {
-    const clip = TL.textClip(preset.text, { style: preset.style, y: preset.y });
+    const k = TL.styleScale(p.canvas);
+    const style = Object.assign({}, preset.style);
+    for (const key of ["size", "outline", "shadow"]) if (style[key] != null) style[key] = Math.round(style[key] * k * 2) / 2;
+    if (style.size == null) style.size = Math.round(96 * k);
+    // Posisi preset dirancang untuk tinggi 1920; diskalakan ke tinggi kanvas sekarang.
+    const clip = TL.textClip(preset.text, { style, y: Math.round((preset.y * p.canvas.height) / 1920) });
     const track = TL.trackFor(p, clip, preview.time, p.tracks.find((t) => t.kind === "video" && t !== p.tracks[0])?.id);
     TL.insertClip(p, track.id, clip, preview.time);
     state.selected = clip.id;
@@ -798,8 +803,18 @@ const CAPTION_PRESETS = [
   { name: "Kuning klasik", style: { font: "Impact", color: "#ffffff", highlight_color: "#ffe600", outline_color: "#000000", outline: 5, shadow: 2, background: "", uppercase: true, highlight_scale: 1.15, animation: "pop" } },
   { name: "Hijau", style: { font: "Arial Black", color: "#ffffff", highlight_color: "#38ff6a", outline_color: "#000000", outline: 6, shadow: 0, background: "", uppercase: true, highlight_scale: 1.1, animation: "pop" } },
   { name: "Kotak", style: { font: "Segoe UI", bold: true, color: "#ffffff", highlight_color: "#35c9ff", outline_color: "#000000", outline: 12, shadow: 0, background: "#000000b0", uppercase: false, highlight_scale: 1, animation: "none" } },
+  { name: "Subtitle YouTube", style: { font: "Segoe UI", bold: true, size: 54, color: "#ffffff", highlight_color: "#ffffff", outline_color: "#000000", outline: 10, shadow: 0, background: "#000000a8", uppercase: false, highlight_scale: 1, animation: "none", words_per_page: 8, max_line_chars: 42, y: 0.88 } },
   { name: "Putih", style: { font: "Bahnschrift", color: "#dddddd", highlight_color: "#ffffff", outline_color: "#000000", outline: 3, shadow: 3, background: "", uppercase: false, highlight_scale: 1.08, animation: "pop" } },
 ];
+
+/** Menerapkan preset caption dengan ukuran disesuaikan kanvas (preset dirancang untuk sisi pendek 1080). */
+function applyCaptionPreset(p, preset) {
+  const k = TL.styleScale(p.canvas);
+  const st = Object.assign({}, preset.style);
+  for (const key of ["size", "outline", "shadow"]) if (st[key] != null) st[key] = Math.round(st[key] * k * 2) / 2;
+  if (st.size == null) st.size = Math.round(80 * k);
+  Object.assign(p.captions.style, st);
+}
 
 function setCaptions(fn, opts = {}) {
   commit((p) => fn(p.captions), Object.assign({ captions: true }, opts));
@@ -842,7 +857,19 @@ function renderCaptionsPanel() {
   const from = el("input", { type: "number", step: "0.1", min: "0", value: defStart.toFixed(2) });
   const to = el("input", { type: "number", step: "0.1", min: "0", value: defEnd.toFixed(2) });
 
-  const wordRows = CAP.sortedWords(cap.words).map((w) => {
+  // Video panjang bisa punya ribuan kata: tampilkan per halaman, mulai dari sekitar playhead.
+  const PAGE = 150;
+  const sortedAll = CAP.sortedWords(cap.words);
+  const query = (state.capQuery || "").trim().toLowerCase();
+  const filtered = query ? sortedAll.filter((w) => String(w.text).toLowerCase().includes(query)) : sortedAll;
+  if (state.capPage == null) {
+    const near = filtered.findIndex((w) => w.end >= preview.time);
+    state.capPage = Math.max(0, Math.floor(Math.max(0, near) / PAGE));
+  }
+  const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
+  state.capPage = Math.min(state.capPage, pages - 1);
+  const shownWords = filtered.slice(state.capPage * PAGE, (state.capPage + 1) * PAGE);
+  const wordRows = shownWords.map((w) => {
     const ref = cap.words.indexOf(w);
     const upd = (key, val) => setCaptions((c) => { c.words[ref][key] = key === "text" ? val : +(+val).toFixed(3); });
     return el("div", { class: "cap-word" },
@@ -851,6 +878,13 @@ function renderCaptionsPanel() {
       el("input", { type: "number", step: "0.05", value: w.end, onchange: (e) => upd("end", e.target.value) }),
       el("button", { title: "Hapus kata", onclick: () => setCaptions((c) => { c.words.splice(ref, 1); }) }, "✕"));
   });
+  const capSearch = el("input", { type: "search", placeholder: "Cari kata…", value: state.capQuery || "" });
+  capSearch.addEventListener("change", () => { state.capQuery = capSearch.value; state.capPage = 0; renderCaptionsPanel(); });
+  const pager = pages > 1 ? el("div", { class: "btn-row" },
+    el("button", { class: "btn small", disabled: state.capPage === 0, onclick: () => { state.capPage--; renderCaptionsPanel(); } }, "‹"),
+    el("span", { class: "hint" }, `Halaman ${state.capPage + 1}/${pages} · ${filtered.length} kata`),
+    el("button", { class: "btn small", disabled: state.capPage >= pages - 1, onclick: () => { state.capPage++; renderCaptionsPanel(); } }, "›"),
+    el("button", { class: "btn small ghost", onclick: () => { state.capPage = null; renderCaptionsPanel(); } }, "Ke playhead")) : null;
 
   panel.replaceChildren(
     el("label", { class: "check" }, el("input", { type: "checkbox", checked: cap.enabled, onchange: (e) => setCaptions((c) => { c.enabled = e.target.checked; }) }), el("b", {}, "Tampilkan caption kata-per-kata")),
@@ -880,6 +914,8 @@ function renderCaptionsPanel() {
         } }, "Bagi ke kata")),
       el("section", {},
         el("h4", {}, `Kata (${cap.words.length})`),
+        cap.words.length > 50 ? capSearch : null,
+        pager,
         cap.words.length ? el("div", { class: "cap-head" }, el("span", {}, "Teks"), el("span", {}, "Mulai"), el("span", {}, "Selesai"), el("span")) : null,
         cap.words.length ? el("div", { class: "cap-words" }, wordRows) : el("p", { class: "hint" }, "Belum ada kata."),
         el("div", { class: "btn-row" },
@@ -888,7 +924,7 @@ function renderCaptionsPanel() {
           cap.words.length ? el("button", { class: "btn small danger", onclick: () => setCaptions((c) => { c.words = []; }) }, "Hapus semua") : null)),
       el("section", {},
         el("h4", {}, "Gaya"),
-        el("div", { class: "btn-row" }, CAPTION_PRESETS.map((pr) => el("button", { class: "btn small", onclick: () => setCaptions((c) => Object.assign(c.style, pr.style)) }, pr.name))),
+        el("div", { class: "btn-row" }, CAPTION_PRESETS.map((pr) => el("button", { class: "btn small", onclick: () => commit((p) => applyCaptionPreset(p, pr), { captions: true }) }, pr.name))),
         styleControls(st, (patch) => Object.assign(state.project.captions.style, patch), { caption: true }))));
 }
 
@@ -1268,7 +1304,7 @@ async function readCaptionWords(path) {
 }
 
 function quickDialog(opts = {}) {
-  const sel = { voice: null, visuals: [], music: null, caption: null, script: "", musicVolume: 15, fit: "cover", capPreset: 0, motion: true };
+  const sel = { voice: null, visuals: [], music: null, caption: null, script: "", musicVolume: 15, fit: "cover", capPreset: 0, motion: true, ratio: "9:16" };
   const needsProject = !state.path || opts.fromWelcome;
   const name = el("input", { type: "text", value: `Shorts ${new Date().toLocaleDateString("id-ID").replace(/\//g, "-")}` });
   const summary = el("div", { class: "quick-summary" });
@@ -1314,9 +1350,10 @@ function quickDialog(opts = {}) {
   });
   const row = (label, ...btns) => el("div", { class: "field" }, el("label", {}, label), el("div", { class: "ctl" }, ...btns));
   openModal(
-    el("h2", {}, "⚡ Buat Shorts cepat"),
+    el("h2", {}, "⚡ Buat video cepat"),
     el("p", { class: "hint" }, "Pilih voice over dan gambar/klip; CutKit membagi gambar sepanjang suara, memotong tepat di awal kata, menambah caption dan musik pelan. Hasilnya tetap bisa diedit."),
     needsProject ? field("Nama proyek", name) : null,
+    needsProject ? field("Ukuran", el("select", { onchange: (e) => { sel.ratio = e.target.value; } }, Object.keys(TL.RATIOS).map((r) => el("option", { value: r, selected: r === "9:16" }, TL.RATIO_LABELS[r])))) : null,
     el("button", { class: "btn", onclick: pickFolder }, "📁 Pilih satu folder berisi semuanya…"),
     el("p", { class: "hint" }, "Contoh isi folder: vo.mp3, 01.png, 02.png, 03.mp4, words.json (atau .srt), musik.mp3. Urutan gambar mengikuti nama file."),
     row("Voice over", el("button", { class: "btn small", onclick: pickFile("voice", [{ name: "Audio", extensions: AUDIO_EXT }]) }, "Pilih…"), el("button", { class: "btn small ghost", onclick: clear("voice") }, "Kosongkan")),
@@ -1339,7 +1376,7 @@ async function runQuick(sel, newName) {
   if (newName != null) {
     let parent;
     try { parent = joinPath(await tauri.path.documentDir(), "CutKit"); } catch { parent = "C:\\CutKit"; }
-    const p = TL.newProject(newName.trim() || "Shorts");
+    const p = TL.newProject(newName.trim() || "Video", sel.ratio || "9:16");
     await setProject(p, joinPath(joinPath(parent, safeName(p.name)), projectFileName(p.name)));
   } else if (TL.duration(state.project) > 0 && !(await ask("Isi timeline sekarang akan diganti hasil susunan otomatis (bisa di-undo dengan Ctrl+Z). Lanjut?"))) {
     return;
@@ -1359,7 +1396,7 @@ async function runQuick(sel, newName) {
   }
   commit((p) => {
     TL.autoAssemble(p, { voice, visuals, music, words, musicVolume: sel.musicVolume / 100, fit: sel.fit, motion: sel.motion !== false });
-    Object.assign(p.captions.style, CAPTION_PRESETS[sel.capPreset].style);
+    applyCaptionPreset(p, CAPTION_PRESETS[sel.capPreset]);
   }, { captions: true });
   closeModal();
   await save().catch(() => {});
@@ -1579,7 +1616,8 @@ async function runExport(options) {
       bar.style.width = `${pr.percent.toFixed(1)}%`;
       const elapsed = (performance.now() - started) / 1000;
       const eta = pr.percent > 2 ? (elapsed * (100 - pr.percent)) / pr.percent : null;
-      info.textContent = `${pr.percent.toFixed(0)}% · ${pr.seconds.toFixed(1)} s dirender${pr.speed ? ` · kecepatan ${pr.speed}` : ""}${eta != null ? ` · sisa ±${Math.ceil(eta)} detik` : ""}`;
+      const fmtEta = (s) => (s >= 90 ? `${Math.floor(s / 60)} menit ${Math.round(s % 60)} detik` : `${Math.ceil(s)} detik`);
+      info.textContent = `${pr.step && pr.step !== "Ekspor" ? `${pr.step} · ` : ""}${pr.percent.toFixed(0)}%${pr.speed ? ` · kecepatan ${pr.speed}` : ""}${eta != null ? ` · sisa ±${fmtEta(eta)}` : ""}`;
     }));
     unlisten.push(await tauri.event.listen("export-done", (ev) => finish(ev.payload)));
     await invoke("export_start", { project: cleanProject(), options });

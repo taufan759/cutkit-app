@@ -122,6 +122,12 @@ pub struct Clip {
     /// Hapus warna latar (green screen).
     pub chroma: Chroma,
     pub text: Option<TextClip>,
+    /// Hanya saat ekspor bertahap: detik sejak awal klip asli (klip terpotong di batas bagian).
+    #[serde(skip)]
+    pub offset: f64,
+    /// Hanya saat ekspor bertahap: panjang klip asli (0 = sama dengan duration).
+    #[serde(skip)]
+    pub span: f64,
 }
 
 impl Default for Clip {
@@ -144,6 +150,8 @@ impl Default for Clip {
             background: "none".into(),
             chroma: Chroma::default(),
             text: None,
+            offset: 0.0,
+            span: 0.0,
         }
     }
 }
@@ -240,8 +248,14 @@ impl Motion {
 
     /// Ekspresi zoompan (z, x, y) dengan `u` = kemajuan frame keluaran.
     pub fn zoompan_exprs(&self, frames: u64) -> (String, String, String) {
+        self.zoompan_exprs_from(frames, 0)
+    }
+
+    /// Seperti `zoompan_exprs`, tetapi frame keluaran pertama adalah frame ke-`first` dari klip utuh.
+    pub fn zoompan_exprs_from(&self, frames: u64, first: u64) -> (String, String, String) {
         let a = fmt_num(self.amount.clamp(0.0, 2.0));
-        let u = if frames > 1 { format!("min(on/{},1)", frames - 1) } else { "0".to_string() };
+        let on = if first > 0 { format!("(on+{first})") } else { "on".to_string() };
+        let u = if frames > 1 { format!("min({on}/{},1)", frames - 1) } else { "0".to_string() };
         let (z, px, py) = match self.kind.as_str() {
             "zoom-in" => (format!("1+{a}*{u}"), "0.5".to_string(), "0.5".to_string()),
             "zoom-out" => (format!("1+{a}*(1-{u})"), "0.5".into(), "0.5".into()),

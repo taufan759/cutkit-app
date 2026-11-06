@@ -10,7 +10,7 @@ pub mod model;
 pub mod probe;
 pub mod proxy;
 
-pub use export::{build_plan, Encoder, ExportOptions, ExportPlan, Quality};
+pub use export::{build_job, build_plan, Encoder, ExportJob, ExportOptions, ExportPlan, ExportStep, Quality};
 pub use ffmpeg::{find_tools, Progress, Tools};
 pub use model::*;
 pub use probe::MediaInfo;

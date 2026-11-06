@@ -18,11 +18,25 @@
 
   const RATIOS = {
     "9:16": [1080, 1920],
+    "16:9": [1920, 1080],
+    "16:9-4k": [3840, 2160],
     "1:1": [1080, 1080],
     "4:5": [1080, 1350],
     "3:4": [1080, 1440],
-    "16:9": [1920, 1080],
   };
+
+  /** Label preset kanvas untuk menu. */
+  const RATIO_LABELS = {
+    "9:16": "Shorts / Reels 9:16 (1080×1920)",
+    "16:9": "YouTube 16:9 (1920×1080)",
+    "16:9-4k": "YouTube 4K 16:9 (3840×2160)",
+    "1:1": "Persegi 1:1 (1080×1080)",
+    "4:5": "Feed 4:5 (1080×1350)",
+    "3:4": "3:4 (1080×1440)",
+  };
+
+  /** Faktor ukuran teks: gaya bawaan dirancang untuk sisi pendek 1080 px. */
+  function styleScale(canvas) { return Math.min(canvas.width, canvas.height) / 1080; }
 
   let counter = 0;
   function uid(prefix) {
@@ -48,6 +62,14 @@
 
   function newProject(name = "Proyek baru", ratio = "9:16") {
     const [width, height] = RATIOS[ratio] || RATIOS["9:16"];
+    const k = Math.min(width, height) / 1080;
+    const cap = defaultCaptionStyle();
+    cap.size = Math.round(cap.size * k);
+    cap.outline = Math.round(cap.outline * k * 2) / 2;
+    if (width > height) {
+      // Video lanskap: subtitle di bawah, lebih banyak kata per halaman.
+      Object.assign(cap, { y: 0.86, words_per_page: 6, max_line_chars: 36, size: Math.round(64 * k) });
+    }
     return {
       version: 1,
       name,
@@ -58,7 +80,7 @@
         { id: "v2", kind: "video", name: "Overlay", muted: false, hidden: false, clips: [] },
         { id: "a1", kind: "audio", name: "Audio", muted: false, hidden: false, clips: [] },
       ],
-      captions: { enabled: false, words: [], style: defaultCaptionStyle() },
+      captions: { enabled: false, words: [], style: cap },
     };
   }
 
@@ -479,22 +501,30 @@
 
   /** Riwayat undo/redo berbasis snapshot JSON. */
   class History {
-    constructor(limit = 200) {
+    /** limit = jumlah langkah, budget = total ukuran snapshot (karakter); proyek panjang tetap hemat memori. */
+    constructor(limit = 200, budget = 64 * 1024 * 1024) {
       this.limit = limit;
+      this.budget = budget;
       this.undoStack = [];
       this.redoStack = [];
     }
+    _trim() {
+      let total = this.undoStack.reduce((n, s) => n + s.length, 0) + this.redoStack.reduce((n, s) => n + s.length, 0);
+      while (this.undoStack.length > 1 && (this.undoStack.length > this.limit || total > this.budget)) {
+        total -= this.undoStack.shift().length;
+      }
+    }
     /** Panggil SEBELUM mengubah proyek. */
     record(project) {
-      this.undoStack.push(JSON.stringify(project));
-      if (this.undoStack.length > this.limit) this.undoStack.shift();
       this.redoStack.length = 0;
+      this.undoStack.push(JSON.stringify(project));
+      this._trim();
     }
     /** Mencatat snapshot JSON yang diambil sebelumnya (untuk perubahan lewat slider/drag). */
     push(json) {
-      this.undoStack.push(json);
-      if (this.undoStack.length > this.limit) this.undoStack.shift();
       this.redoStack.length = 0;
+      this.undoStack.push(json);
+      this._trim();
     }
     /** Membatalkan pencatatan terakhir (mis. operasi ternyata gagal). */
     drop() { this.undoStack.pop(); }
@@ -621,7 +651,7 @@
 
   return {
     allocate, snapCuts, autoAssemble, speedOf, sourceTime, setSpeed,
-    MIN_DURATION, STILL_DURATION, RATIOS,
+    MIN_DURATION, STILL_DURATION, RATIOS, RATIO_LABELS, styleScale,
     uid, newProject, normalize, normalizeClip, defaultTextStyle, defaultCaptionStyle, defaultTransform,
     clipEnd, duration, getTrack, getAsset, findClip, trackAccepts, overlaps, findFreeStart,
     addTrack, removeTrack, moveTrack, clipFromAsset, textClip, insertClip, trackFor,

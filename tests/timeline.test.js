@@ -276,3 +276,19 @@ test("latar blur dinormalisasi ke none/blur", () => {
   const p = T.normalize({ tracks: [{ id: "v1", clips: [{ id: "a", start: 0, duration: 1, background: "blur" }, { id: "b", start: 1, duration: 1, background: "aneh" }] }] });
   assert.deepEqual(p.tracks[0].clips.map((c) => c.background), ["blur", "none"]);
 });
+
+test("video panjang: preset 16:9/4K, caption lanskap, history dibatasi ukuran", () => {
+  const yt = T.newProject("YT", "16:9");
+  assert.deepEqual([yt.canvas.width, yt.canvas.height], [1920, 1080]);
+  assert.equal(yt.captions.style.y, 0.86);
+  assert.equal(yt.captions.style.words_per_page, 6);
+  const k4 = T.newProject("4K", "16:9-4k");
+  assert.deepEqual([k4.canvas.width, k4.canvas.height], [3840, 2160]);
+  assert.equal(k4.captions.style.size, 128, "ukuran caption ikut skala 2x");
+  assert.equal(T.styleScale(k4.canvas), 2);
+  const h = new T.History(1000, 1000);
+  const big = { data: "x".repeat(300) };
+  for (let i = 0; i < 10; i++) h.record(big);
+  assert.ok(h.undoStack.length <= 4, `tersisa ${h.undoStack.length}`);
+  assert.ok(h.canUndo);
+});

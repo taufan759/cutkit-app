@@ -12,7 +12,7 @@
     <div class="menu-wrap">
       <button class="btn ghost" id="menu-btn">Proyek ▾</button>
       <div class="menu hidden" id="project-menu">
-        <button data-cmd="quick">⚡ Buat Shorts cepat…</button>
+        <button data-cmd="quick">⚡ Buat video cepat…</button>
         <button data-cmd="new">Proyek baru…</button>
         <button data-cmd="open">Buka proyek…</button>
         <button data-cmd="save">Simpan <kbd>Ctrl+S</kbd></button>
@@ -31,12 +31,13 @@
     <div class="spacer"></div>
     <button class="icon-btn" id="undo-btn" title="Urungkan (Ctrl+Z)" disabled>↶</button>
     <button class="icon-btn" id="redo-btn" title="Ulangi (Ctrl+Y)" disabled>↷</button>
-    <select id="ratio-select" title="Rasio kanvas">
+    <select id="ratio-select" title="Ukuran kanvas">
       <option value="9:16">9:16 Shorts</option>
+      <option value="16:9">16:9 YouTube</option>
+      <option value="16:9-4k">16:9 4K</option>
       <option value="1:1">1:1</option>
       <option value="4:5">4:5</option>
       <option value="3:4">3:4</option>
-      <option value="16:9">16:9</option>
     </select>
     <button class="btn primary" id="export-btn">⇪ Ekspor</button>
   </header>
@@ -82,7 +83,7 @@
         <div class="empty-hint hidden" id="empty-hint">
           <h3>Mulai dari sini</h3>
           <p>Seret video, gambar, atau audio ke jendela ini, atau:</p>
-          <button class="btn primary" id="empty-quick">⚡ Buat Shorts cepat</button>
+          <button class="btn primary" id="empty-quick">⚡ Buat video cepat</button>
           <button class="btn" id="empty-import">＋ Impor media</button>
           <button class="btn ghost" id="empty-demo">🎬 Coba contoh proyek</button>
         </div>

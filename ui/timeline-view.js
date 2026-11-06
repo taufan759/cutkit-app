@@ -9,7 +9,7 @@
 
   const ROW_H = { video: 62, audio: 46, captions: 28 };
   const SNAP_PX = 9;
-  const MIN_PPS = 4;
+  const MIN_PPS = 0.05; // cukup untuk melihat video 5 jam dalam satu layar
   const MAX_PPS = 800;
 
   function el(tag, attrs = {}, ...children) {
@@ -26,6 +26,12 @@
 
   function fmtTime(t, fps = 30) {
     t = Math.max(0, t);
+    if (t >= 3600) {
+      const hh = Math.floor(t / 3600);
+      const mm = Math.floor((t % 3600) / 60);
+      const ss = Math.floor(t % 60);
+      return `${hh}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+    }
     const m = Math.floor(t / 60);
     const s = Math.floor(t % 60);
     const f = Math.floor((t - Math.floor(t)) * fps + 1e-6);
@@ -224,8 +230,8 @@
       ctx.fillStyle = css.getPropertyValue("--muted").trim() || "#999";
       ctx.strokeStyle = ctx.fillStyle;
       ctx.font = "10px Segoe UI, sans-serif";
-      const steps = [1 / 30, 0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300];
-      const major = steps.find((s) => s * this.pps >= 70) || 600;
+      const steps = [1 / 30, 0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200];
+      const major = steps.find((s) => s * this.pps >= 70) || 14400;
       const minor = major / (major >= 1 ? 5 : 2);
       const start = this.scroll.scrollLeft / this.pps;
       const end = start + w / this.pps;
@@ -235,7 +241,7 @@
         const isMajor = Math.abs(t / major - Math.round(t / major)) < 1e-6;
         ctx.moveTo(x, h);
         ctx.lineTo(x, isMajor ? h - 10 : h - 5);
-        if (isMajor) ctx.fillText(major < 1 ? fmtTime(t, this.project.canvas.fps) : fmtTime(t).slice(0, 5), x + 3, 11);
+        if (isMajor) ctx.fillText(major < 1 ? fmtTime(t, this.project.canvas.fps) : t >= 3600 ? fmtTime(t) : fmtTime(t).slice(0, 5), x + 3, 11);
       }
       ctx.stroke();
     }

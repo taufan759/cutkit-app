@@ -1,6 +1,6 @@
 //! Menemukan dan menjalankan ffmpeg/ffprobe.
 
-use crate::export::{ExportPlan, ASS_FILE, FILTER_FILE};
+use crate::export::{ExportJob, ExportPlan, ExportStep, ASS_FILE, FILTER_FILE};
 use crate::probe::{parse_ffprobe, probe_args, MediaInfo};
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Read};
@@ -196,22 +196,70 @@ pub struct Progress {
     pub percent: f64,
     pub speed: String,
     pub done: bool,
+    /// Langkah yang sedang berjalan (mis. "Video bagian 2/5").
+    pub step: String,
 }
 
-/// Menulis skrip filter + ASS ke `work_dir`, lalu menjalankan ekspor dengan laporan progres.
-/// `cancel` yang di-set true akan mematikan ffmpeg.
-pub fn run_export(ffmpeg: &str, work_dir: &Path, plan: &ExportPlan, cancel: Arc<AtomicBool>, mut on_progress: impl FnMut(Progress)) -> Result<(), String> {
-    std::fs::create_dir_all(work_dir).map_err(|e| format!("Tidak bisa membuat folder kerja: {e}"))?;
-    std::fs::write(work_dir.join(FILTER_FILE), &plan.filter_script).map_err(|e| e.to_string())?;
-    if let Some(ass) = &plan.ass {
-        std::fs::write(work_dir.join(ASS_FILE), ass).map_err(|e| e.to_string())?;
+/// Menjalankan rencana sekali jalan (dipakai tes dan contoh render).
+pub fn run_export(ffmpeg: &str, work_dir: &Path, plan: &ExportPlan, cancel: Arc<AtomicBool>, on_progress: impl FnMut(Progress)) -> Result<(), String> {
+    let mut files = vec![(FILTER_FILE.to_string(), plan.filter_script.clone())];
+    if let Some(a) = &plan.ass {
+        files.push((ASS_FILE.to_string(), a.clone()));
     }
-    if let Some(parent) = Path::new(plan.args.last().map(String::as_str).unwrap_or("")).parent() {
+    let output = plan.args.last().cloned().unwrap_or_default();
+    let job = ExportJob {
+        steps: vec![ExportStep { label: "Ekspor".into(), args: plan.args.clone(), files, duration: plan.duration, weight: 1.0 }],
+        duration: plan.duration,
+        output,
+        chunked: false,
+    };
+    run_job(ffmpeg, work_dir, &job, cancel, on_progress)
+}
+
+/// Menjalankan semua langkah ekspor berurutan di `work_dir` dengan satu progres gabungan.
+/// `cancel` yang di-set true mematikan ffmpeg dan menghapus file hasil yang belum jadi.
+pub fn run_job(ffmpeg: &str, work_dir: &Path, job: &ExportJob, cancel: Arc<AtomicBool>, mut on_progress: impl FnMut(Progress)) -> Result<(), String> {
+    std::fs::create_dir_all(work_dir).map_err(|e| format!("Tidak bisa membuat folder kerja: {e}"))?;
+    if let Some(parent) = Path::new(&job.output).parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent).map_err(|e| format!("Tidak bisa membuat folder tujuan: {e}"))?;
         }
     }
-    let mut child = quiet(Command::new(ffmpeg).args(&plan.args).current_dir(work_dir))
+    let mut done = 0.0;
+    let mut speed = String::new();
+    for step in &job.steps {
+        if cancel.load(Ordering::Relaxed) {
+            let _ = std::fs::remove_file(&job.output);
+            return Err("Ekspor dibatalkan.".into());
+        }
+        let weight = step.weight;
+        let label = step.label.clone();
+        let result = run_step(ffmpeg, work_dir, step, cancel.clone(), |sec, sp| {
+            speed = sp.to_string();
+            let frac = if step.duration > 0.0 { (sec / step.duration).clamp(0.0, 1.0) } else { 0.0 };
+            let percent = ((done + weight * frac) * 100.0).clamp(0.0, 100.0);
+            on_progress(Progress { seconds: percent / 100.0 * job.duration, percent, speed: sp.to_string(), done: false, step: label.clone() });
+        });
+        if let Err(e) = result {
+            let _ = std::fs::remove_file(&job.output);
+            return Err(if job.steps.len() > 1 && !e.contains("dibatalkan") { format!("{}: {e}", step.label) } else { e });
+        }
+        done += weight;
+    }
+    on_progress(Progress { seconds: job.duration, percent: 100.0, speed, done: true, step: "Selesai".into() });
+    Ok(())
+}
+
+/// Satu proses ffmpeg dengan laporan (detik keluaran, kecepatan).
+fn run_step(ffmpeg: &str, work_dir: &Path, step: &ExportStep, cancel: Arc<AtomicBool>, mut on_progress: impl FnMut(f64, &str)) -> Result<(), String> {
+    for (name, content) in &step.files {
+        std::fs::write(work_dir.join(name), content).map_err(|e| e.to_string())?;
+    }
+    run_ffmpeg_progress(ffmpeg, work_dir, &step.args, cancel, |sec, sp| on_progress(sec, sp))
+}
+
+fn run_ffmpeg_progress(ffmpeg: &str, work_dir: &Path, args: &[String], cancel: Arc<AtomicBool>, mut on_progress: impl FnMut(f64, &str)) -> Result<(), String> {
+    let mut child = quiet(Command::new(ffmpeg).args(args).current_dir(work_dir))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -227,7 +275,10 @@ pub fn run_export(ffmpeg: &str, work_dir: &Path, plan: &ExportPlan, cancel: Arc<
     let reader = BufReader::new(stdout);
     let mut seconds = 0.0;
     let mut speed = String::new();
-    let mut cancelled = false;
+    let mut cancelled = cancel.load(Ordering::Relaxed);
+    if cancelled {
+        let _ = child.kill();
+    }
     for line in reader.lines() {
         let Ok(line) = line else { break };
         if cancel.load(Ordering::Relaxed) {
@@ -243,10 +294,7 @@ pub fn run_export(ffmpeg: &str, work_dir: &Path, plan: &ExportPlan, cancel: Arc<
                     }
                 }
                 "speed" => speed = value.trim().to_string(),
-                "progress" => {
-                    let percent = if plan.duration > 0.0 { (seconds / plan.duration * 100.0).clamp(0.0, 100.0) } else { 0.0 };
-                    on_progress(Progress { seconds, percent, speed: speed.clone(), done: false });
-                }
+                "progress" => on_progress(seconds, &speed),
                 _ => {}
             }
         }
@@ -254,14 +302,10 @@ pub fn run_export(ffmpeg: &str, work_dir: &Path, plan: &ExportPlan, cancel: Arc<
     let status = child.wait().map_err(|e| e.to_string())?;
     let stderr_text = err_reader.join().unwrap_or_default();
     if cancelled {
-        if let Some(out) = plan.args.last() {
-            let _ = std::fs::remove_file(out);
-        }
         return Err("Ekspor dibatalkan.".into());
     }
     if !status.success() {
         return Err(tail(&stderr_text));
     }
-    on_progress(Progress { seconds: plan.duration, percent: 100.0, speed, done: true });
     Ok(())
 }

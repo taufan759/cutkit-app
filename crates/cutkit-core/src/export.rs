@@ -1,10 +1,13 @@
 //! Penyusun perintah ffmpeg untuk ekspor. Fungsi di sini murni (tidak menjalankan
-//! apa pun) supaya bisa diuji; `ffmpeg::run_export` yang mengeksekusinya.
+//! apa pun) supaya bisa diuji; `ffmpeg::run_job` yang mengeksekusinya.
 //!
-//! Strategi: satu filter graph. Latar `color` sebesar kanvas, lalu tiap klip
-//! visual (urut dari track bawah ke atas) di-overlay pada rentang waktunya;
-//! caption dan teks dirender terakhir lewat libass; audio tiap klip ditunda
-//! (`adelay`) lalu dicampur `amix`.
+//! Strategi satu pass: latar `color` sebesar kanvas, lalu tiap klip visual (urut dari
+//! track bawah ke atas) di-overlay pada rentang waktunya; caption dan teks dirender
+//! terakhir lewat libass; audio tiap klip ditunda (`adelay`) lalu dicampur `amix`.
+//!
+//! Video panjang (banyak klip atau durasi lama) diekspor bertahap supaya RAM tetap
+//! kecil: satu pass audio untuk seluruh video, video per bagian (tiap bagian hanya
+//! membuka klip yang tampil di dalamnya), lalu bagian-bagian digabung tanpa encode ulang.
 
 use crate::ass;
 use crate::layout::{place, Placement};
@@ -13,6 +16,12 @@ use serde::{Deserialize, Serialize};
 
 pub const FILTER_FILE: &str = "cutkit-filter.txt";
 pub const ASS_FILE: &str = "cutkit-captions.ass";
+
+/// Batas klip visual per pass dan panjang tiap bagian pada ekspor bertahap.
+pub const MAX_VISUAL_INPUTS: usize = 16;
+pub const MAX_CHUNK_SECONDS: f64 = 120.0;
+/// Proyek sampai sepanjang ini dengan klip sedikit diekspor sekali jalan.
+pub const MAX_SINGLE_PASS_SECONDS: f64 = 300.0;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -54,13 +63,36 @@ pub struct ExportPlan {
     pub duration: f64,
 }
 
+/// Satu proses ffmpeg dalam ekspor.
+#[derive(Debug, Clone)]
+pub struct ExportStep {
+    pub label: String,
+    pub args: Vec<String>,
+    /// File (nama, isi) yang ditulis ke folder kerja sebelum langkah dijalankan.
+    pub files: Vec<(String, String)>,
+    /// Panjang keluaran langkah ini (detik), untuk menghitung progres.
+    pub duration: f64,
+    /// Porsi progres total; jumlah semua langkah = 1.
+    pub weight: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExportJob {
+    pub steps: Vec<ExportStep>,
+    pub duration: f64,
+    pub output: String,
+    /// true bila ekspor dibagi beberapa bagian (video panjang).
+    pub chunked: bool,
+}
+
 struct Visual {
     input: usize,
     blur_bg: bool,
     /// Argumen colorkey (warna:similarity:blend) bila chroma key aktif.
     colorkey: Option<String>,
     speed: f64,
-    motion: Option<(Motion, u64)>,
+    /// Gerak, jumlah frame seluruh klip, dan frame awal bila klip terpotong di batas bagian.
+    motion: Option<(Motion, u64, u64)>,
     start: f64,
     end: f64,
     place: Placement,
@@ -105,26 +137,38 @@ fn f(v: f64) -> String {
     }
 }
 
-pub fn build_plan(project: &Project, opts: &ExportOptions) -> Result<ExportPlan, String> {
-    if opts.output.trim().is_empty() {
-        return Err("Tentukan file hasil ekspor.".into());
-    }
-    let duration = project.duration();
-    if duration <= 0.0 {
-        return Err("Timeline masih kosong, tidak ada yang bisa diekspor.".into());
-    }
+fn strings(v: &[&str]) -> Vec<String> {
+    v.iter().map(|s| s.to_string()).collect()
+}
+
+/// Apa yang dihasilkan satu pass ffmpeg.
+struct Pass {
+    video: bool,
+    audio: bool,
+    loudnorm: bool,
+    ass: Option<String>,
+    filter_file: String,
+    ass_file: String,
+    /// Panjang keluaran (detik); bisa lebih panjang dari klip terakhir pada bagian video.
+    duration: f64,
+}
+
+fn is_visual(track_kind: TrackKind, hidden: bool, clip_kind: ClipKind, asset_kind: AssetKind) -> bool {
+    track_kind == TrackKind::Video && !hidden && asset_kind != AssetKind::Audio && clip_kind != ClipKind::Audio && clip_kind != ClipKind::Text
+}
+
+/// Menyusun input dan filter graph satu pass. Mengembalikan (argumen input + map, filter graph).
+fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String), String> {
     let (w, h, fps) = (project.canvas.width, project.canvas.height, project.canvas.fps);
+    let duration = pass.duration;
     let bg = project.canvas.background.trim_start_matches('#');
     let bg = if bg.len() == 6 { format!("0x{bg}") } else { "black".to_string() };
 
-    let mut args: Vec<String> = vec![
+    let mut args = strings(&[
         "-hide_banner", "-y", "-nostats", "-loglevel", "error", "-progress", "pipe:1", "-stats_period", "0.25",
         "-f", "lavfi", "-i", &format!("color=c={bg}:s={w}x{h}:r={}:d={}", f(fps), f(duration)),
         "-f", "lavfi", "-t", &f(duration), "-i", "anullsrc=r=48000:cl=stereo",
-    ]
-    .into_iter()
-    .map(String::from)
-    .collect();
+    ]);
 
     let mut visuals: Vec<Visual> = vec![];
     let mut audios: Vec<AudioSrc> = vec![];
@@ -140,8 +184,8 @@ pub fn build_plan(project: &Project, opts: &ExportOptions) -> Result<ExportPlan,
             let Some(asset) = clip.asset_id.as_deref().and_then(|id| project.asset(id)) else {
                 return Err(format!("Klip {} merujuk ke media yang tidak ada di proyek.", clip.id));
             };
-            let want_video = track.kind == TrackKind::Video && !track.hidden && asset.kind != AssetKind::Audio && clip.kind != ClipKind::Audio;
-            let want_audio = !track.muted && !clip.muted && clip.volume > 0.0 && asset.has_audio && clip.kind != ClipKind::Image;
+            let want_video = pass.video && is_visual(track.kind, track.hidden, clip.kind, asset.kind);
+            let want_audio = pass.audio && !track.muted && !clip.muted && clip.volume > 0.0 && asset.has_audio && clip.kind != ClipKind::Image;
             if !want_video && !want_audio {
                 continue;
             }
@@ -149,31 +193,37 @@ pub fn build_plan(project: &Project, opts: &ExportOptions) -> Result<ExportPlan,
             next_input += 1;
             if asset.kind == AssetKind::Image && asset.path.to_ascii_lowercase().ends_with(".gif") {
                 // GIF diam tidak bisa dibaca image2; ulangi frame-nya dengan stream_loop.
-                args.extend(["-stream_loop", "-1", "-t", &f(clip.duration), "-i", &asset.path].map(String::from));
+                args.extend(strings(&["-stream_loop", "-1", "-t", &f(clip.duration), "-i", &asset.path]));
             } else if asset.kind == AssetKind::Image {
                 // image2 + pattern_type none: nama file dengan '%' (umum di nama meme) tidak dianggap pola urutan.
-                args.extend(["-f", "image2", "-pattern_type", "none", "-loop", "1", "-framerate", &f(fps), "-t", &f(clip.duration), "-i", &asset.path].map(String::from));
+                args.extend(strings(&["-f", "image2", "-pattern_type", "none", "-loop", "1", "-framerate", &f(fps), "-t", &f(clip.duration), "-i", &asset.path]));
             } else {
                 if clip.source_in > 0.0 {
-                    args.extend(["-ss", &f(clip.source_in)].map(String::from));
+                    args.extend(strings(&["-ss", &f(clip.source_in)]));
                 }
-                args.extend(["-t", &f(clip.source_duration())].map(String::from));
+                args.extend(strings(&["-t", &f(clip.source_duration())]));
                 if !want_video {
                     args.push("-vn".into());
                 }
                 if !want_audio {
                     args.push("-an".into());
                 }
-                args.extend(["-i", &asset.path].map(String::from));
+                args.extend(strings(&["-i", &asset.path]));
             }
             if want_video {
                 let pl = place(w, h, asset.width, asset.height, clip.fit, &clip.transform);
-                let motion = clip.motion.is_active().then(|| (clip.motion.clone(), (clip.source_duration() * fps).round().max(1.0) as u64));
+                let speed = clip.effective_speed();
+                let span = if clip.span > 0.0 { clip.span } else { clip.duration };
+                let motion = clip.motion.is_active().then(|| {
+                    let total = (span * speed * fps).round().max(1.0) as u64;
+                    let first = (clip.offset * speed * fps).round().max(0.0) as u64;
+                    (clip.motion.clone(), total, first)
+                });
                 let colorkey = clip.chroma.enabled.then(|| {
                     let (r, g, b, _) = crate::ass::parse_color(&clip.chroma.color);
                     format!("0x{r:02x}{g:02x}{b:02x}:{}:{}", f(clip.chroma.similarity.clamp(0.01, 1.0)), f(clip.chroma.blend.clamp(0.0, 1.0)))
                 });
-                visuals.push(Visual { input, blur_bg: clip.background == "blur", colorkey, speed: clip.effective_speed(), motion, start: clip.start, end: clip.end(), place: pl, opacity: clip.transform.opacity.clamp(0.0, 1.0) });
+                visuals.push(Visual { input, blur_bg: clip.background == "blur", colorkey, speed, motion, start: clip.start, end: clip.end(), place: pl, opacity: clip.transform.opacity.clamp(0.0, 1.0) });
             }
             if want_audio {
                 audios.push(AudioSrc {
@@ -190,118 +240,131 @@ pub fn build_plan(project: &Project, opts: &ExportOptions) -> Result<ExportPlan,
     }
 
     let mut g: Vec<String> = vec![];
-    g.push("[0:v]format=rgba[b0]".into());
-    // Radius blur latar sebanding ukuran kanvas (40 px untuk 1080).
-    let blur_radius = ((w.min(h) as f64) / 27.0).round().max(4.0) as u32;
-    for (i, v) in visuals.iter().enumerate() {
-        let p = &v.place;
-        let pts = if (v.speed - 1.0).abs() > 1e-6 {
-            format!("setpts=(PTS-STARTPTS)/{}+{}/TB", f(v.speed), f(v.start))
-        } else {
-            format!("setpts=PTS-STARTPTS+{}/TB", f(v.start))
-        };
-        let mut base = format!("[b{i}]");
-        let mut src = format!("[{}:v]", v.input);
-        if v.blur_bg {
-            g.push(format!("[{}:v]split=2[s{i}][q{i}]", v.input));
-            g.push(format!(
-                "[q{i}]format=rgba,scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},boxblur={blur_radius}:2,{pts}[l{i}]"
-            ));
-            g.push(format!("[b{i}][l{i}]overlay=x=0:y=0:format=rgb:eof_action=pass:enable='between(t,{},{})'[k{i}]", f(v.start), f(v.end)));
-            base = format!("[k{i}]");
-            src = format!("[s{i}]");
-        }
-        // Chroma key dikerjakan pada resolusi asli sebelum diskalakan.
-        let key = v.colorkey.as_ref().map(|k| format!(",colorkey={k}")).unwrap_or_default();
-        let mut chain = match &v.motion {
-            // Diperbesar 2x dulu supaya pembulatan posisi zoompan tidak membuat gambar bergetar.
-            Some((m, frames)) => {
-                let (z, x, y) = m.zoompan_exprs(*frames);
-                // Faktor dibatasi agar sisi terpanjang <= 4096 px (klip besar tetap ringan di laptop).
-                let k = (4096.0 / p.w.max(p.h) as f64).clamp(1.0, 2.0);
-                format!(
-                    "{src}format=rgba{key},fps={},scale={}:{},zoompan=z='{z}':x='{x}':y='{y}':d=1:s={}x{}:fps={}",
-                    f(fps),
-                    (p.w as f64 * k).round() as u32,
-                    (p.h as f64 * k).round() as u32,
-                    p.w,
-                    p.h,
-                    f(fps)
-                )
+    if pass.video {
+        g.push("[0:v]format=rgba[b0]".into());
+        // Radius blur latar sebanding ukuran kanvas (40 px untuk 1080).
+        let blur_radius = ((w.min(h) as f64) / 27.0).round().max(4.0) as u32;
+        for (i, v) in visuals.iter().enumerate() {
+            let p = &v.place;
+            let pts = if (v.speed - 1.0).abs() > 1e-6 {
+                format!("setpts=(PTS-STARTPTS)/{}+{}/TB", f(v.speed), f(v.start))
+            } else {
+                format!("setpts=PTS-STARTPTS+{}/TB", f(v.start))
+            };
+            let mut base = format!("[b{i}]");
+            let mut src = format!("[{}:v]", v.input);
+            if v.blur_bg {
+                g.push(format!("[{}:v]split=2[s{i}][q{i}]", v.input));
+                g.push(format!(
+                    "[q{i}]format=rgba,scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},boxblur={blur_radius}:2,{pts}[l{i}]"
+                ));
+                g.push(format!("[b{i}][l{i}]overlay=x=0:y=0:format=rgb:eof_action=pass:enable='between(t,{},{})'[k{i}]", f(v.start), f(v.end)));
+                base = format!("[k{i}]");
+                src = format!("[s{i}]");
             }
-            None => format!("{src}format=rgba{key},scale={}:{}", p.w, p.h),
-        };
-        if p.radians.abs() > 1e-9 {
-            chain.push_str(&format!(",rotate={}:ow={}:oh={}:c=0x00000000", f(p.radians), p.ow, p.oh));
+            // Chroma key dikerjakan pada resolusi asli sebelum diskalakan.
+            let key = v.colorkey.as_ref().map(|k| format!(",colorkey={k}")).unwrap_or_default();
+            let mut chain = match &v.motion {
+                // Diperbesar dulu supaya pembulatan posisi zoompan tidak membuat gambar bergetar.
+                Some((m, frames, first)) => {
+                    let (z, x, y) = m.zoompan_exprs_from(*frames, *first);
+                    // Faktor dibatasi agar sisi terpanjang <= 4096 px (klip besar tetap ringan di laptop).
+                    let k = (4096.0 / p.w.max(p.h) as f64).clamp(1.0, 2.0);
+                    format!(
+                        "{src}format=rgba{key},fps={},scale={}:{},zoompan=z='{z}':x='{x}':y='{y}':d=1:s={}x{}:fps={}",
+                        f(fps),
+                        (p.w as f64 * k).round() as u32,
+                        (p.h as f64 * k).round() as u32,
+                        p.w,
+                        p.h,
+                        f(fps)
+                    )
+                }
+                None => format!("{src}format=rgba{key},scale={}:{}", p.w, p.h),
+            };
+            if p.radians.abs() > 1e-9 {
+                chain.push_str(&format!(",rotate={}:ow={}:oh={}:c=0x00000000", f(p.radians), p.ow, p.oh));
+            }
+            if v.opacity < 0.999 {
+                chain.push_str(&format!(",colorchannelmixer=aa={}", f(v.opacity)));
+            }
+            chain.push_str(&format!(",{pts}[v{i}]"));
+            g.push(chain);
+            g.push(format!(
+                "{base}[v{i}]overlay=x={}:y={}:format=rgb:eof_action=pass:enable='between(t,{},{})'[b{}]",
+                p.x,
+                p.y,
+                f(v.start),
+                f(v.end),
+                i + 1
+            ));
         }
-        if v.opacity < 0.999 {
-            chain.push_str(&format!(",colorchannelmixer=aa={}", f(v.opacity)));
+        let last = format!("[b{}]", visuals.len());
+        match &pass.ass {
+            Some(_) => g.push(format!("{last}ass={},format=yuv420p[vout]", pass.ass_file)),
+            None => g.push(format!("{last}format=yuv420p[vout]")),
         }
-        chain.push_str(&format!(",{pts}[v{i}]"));
-        g.push(chain);
-        g.push(format!(
-            "{base}[v{i}]overlay=x={}:y={}:format=rgb:eof_action=pass:enable='between(t,{},{})'[b{}]",
-            p.x,
-            p.y,
-            f(v.start),
-            f(v.end),
-            i + 1
-        ));
-    }
-    let last = format!("[b{}]", visuals.len());
-    let ass_text = ass::build_ass(project);
-    let final_fmt = if opts.encoder == Encoder::Qsv { "nv12" } else { "yuv420p" };
-    match &ass_text {
-        Some(_) => g.push(format!("{last}ass={ASS_FILE},format={final_fmt}[vout]")),
-        None => g.push(format!("{last}format={final_fmt}[vout]")),
     }
 
-    let mix_out = if opts.normalize_loudness { "[amix]" } else { "[aout]" };
-    if audios.is_empty() {
-        g.push(format!("[1:a]anull{mix_out}"));
-    } else {
-        let mut labels = String::from("[1:a]");
-        for (i, a) in audios.iter().enumerate() {
-            let mut chain = format!(
-                "[{}:a]atrim=0:{},asetpts=PTS-STARTPTS,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo",
-                a.input,
-                f(a.duration * a.speed)
-            );
-            let tempo = atempo_chain(a.speed);
-            if !tempo.is_empty() {
-                chain.push(',');
-                chain.push_str(&tempo);
+    if pass.audio {
+        let mix_out = if pass.loudnorm { "[amix]" } else { "[aout]" };
+        if audios.is_empty() {
+            g.push(format!("[1:a]anull{mix_out}"));
+        } else {
+            let mut labels = String::from("[1:a]");
+            for (i, a) in audios.iter().enumerate() {
+                let mut chain = format!(
+                    "[{}:a]atrim=0:{},asetpts=PTS-STARTPTS,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo",
+                    a.input,
+                    f(a.duration * a.speed)
+                );
+                let tempo = atempo_chain(a.speed);
+                if !tempo.is_empty() {
+                    chain.push(',');
+                    chain.push_str(&tempo);
+                }
+                if (a.volume - 1.0).abs() > 1e-6 {
+                    chain.push_str(&format!(",volume={}", f(a.volume)));
+                }
+                if a.fade_in > 0.0 {
+                    chain.push_str(&format!(",afade=t=in:st=0:d={}", f(a.fade_in)));
+                }
+                if a.fade_out > 0.0 {
+                    chain.push_str(&format!(",afade=t=out:st={}:d={}", f(a.duration - a.fade_out), f(a.fade_out)));
+                }
+                let ms = (a.start * 1000.0).round() as i64;
+                chain.push_str(&format!(",adelay={ms}:all=1[a{i}]"));
+                g.push(chain);
+                labels.push_str(&format!("[a{i}]"));
             }
-            if (a.volume - 1.0).abs() > 1e-6 {
-                chain.push_str(&format!(",volume={}", f(a.volume)));
-            }
-            if a.fade_in > 0.0 {
-                chain.push_str(&format!(",afade=t=in:st=0:d={}", f(a.fade_in)));
-            }
-            if a.fade_out > 0.0 {
-                chain.push_str(&format!(",afade=t=out:st={}:d={}", f(a.duration - a.fade_out), f(a.fade_out)));
-            }
-            let ms = (a.start * 1000.0).round() as i64;
-            chain.push_str(&format!(",adelay={ms}:all=1[a{i}]"));
-            g.push(chain);
-            labels.push_str(&format!("[a{i}]"));
+            g.push(format!("{labels}amix=inputs={}:normalize=0:duration=first:dropout_transition=0{mix_out}", audios.len() + 1));
         }
-        g.push(format!("{labels}amix=inputs={}:normalize=0:duration=first:dropout_transition=0{mix_out}", audios.len() + 1));
-    }
-    if opts.normalize_loudness {
-        g.push(format!("[amix]{LOUDNORM}[aout]"));
+        if pass.loudnorm {
+            g.push(format!("[amix]{LOUDNORM}[aout]"));
+        }
     }
     let filter_script = g.join(";\n") + "\n";
 
-    args.extend(["-/filter_complex", FILTER_FILE, "-map", "[vout]", "-map", "[aout]"].map(String::from));
-    match opts.encoder {
+    args.extend(strings(&["-/filter_complex", &pass.filter_file]));
+    if pass.video {
+        args.extend(strings(&["-map", "[vout]"]));
+    }
+    if pass.audio {
+        args.extend(strings(&["-map", "[aout]"]));
+    }
+    Ok((args, filter_script))
+}
+
+/// Argumen encoder video (sama untuk semua bagian supaya bisa digabung tanpa encode ulang).
+fn video_codec_args(opts: &ExportOptions, fps: f64) -> Vec<String> {
+    let mut a = match opts.encoder {
         Encoder::X264 => {
             let (preset, crf) = match opts.quality {
                 Quality::Fast => ("veryfast", "23"),
                 Quality::Balanced => ("medium", "20"),
                 Quality::Best => ("slow", "18"),
             };
-            args.extend(["-c:v", "libx264", "-preset", preset, "-crf", crf, "-profile:v", "high"].map(String::from));
+            strings(&["-c:v", "libx264", "-preset", preset, "-crf", crf, "-profile:v", "high", "-pix_fmt", "yuv420p"])
         }
         Encoder::Qsv => {
             let (preset, q) = match opts.quality {
@@ -309,13 +372,194 @@ pub fn build_plan(project: &Project, opts: &ExportOptions) -> Result<ExportPlan,
                 Quality::Balanced => ("medium", "23"),
                 Quality::Best => ("slow", "20"),
             };
-            args.extend(["-c:v", "h264_qsv", "-preset", preset, "-global_quality", q].map(String::from));
+            strings(&["-c:v", "h264_qsv", "-preset", preset, "-global_quality", q, "-pix_fmt", "nv12"])
+        }
+    };
+    let gop = (fps * 2.0).round().max(1.0) as i64;
+    a.extend(strings(&["-g", &gop.to_string(), "-r", &f(fps)]));
+    a
+}
+
+fn check(project: &Project, opts: &ExportOptions) -> Result<f64, String> {
+    if opts.output.trim().is_empty() {
+        return Err("Tentukan file hasil ekspor.".into());
+    }
+    let duration = project.duration();
+    if duration <= 0.0 {
+        return Err("Timeline masih kosong, tidak ada yang bisa diekspor.".into());
+    }
+    Ok(duration)
+}
+
+/// Rencana ekspor sekali jalan (video + audio dalam satu proses ffmpeg).
+pub fn build_plan(project: &Project, opts: &ExportOptions) -> Result<ExportPlan, String> {
+    let duration = check(project, opts)?;
+    let ass_text = ass::build_ass(project);
+    let pass = Pass {
+        video: true,
+        audio: true,
+        loudnorm: opts.normalize_loudness,
+        ass: ass_text.clone(),
+        filter_file: FILTER_FILE.into(),
+        ass_file: ASS_FILE.into(),
+        duration,
+    };
+    let (mut args, filter_script) = build_pass(project, &pass)?;
+    args.extend(video_codec_args(opts, project.canvas.fps));
+    args.extend(strings(&["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", "-t", &f(duration), &opts.output]));
+    Ok(ExportPlan { args, filter_script, ass: ass_text, duration })
+}
+
+/// Klip visual yang membutuhkan input ffmpeg sendiri: (mulai, selesai).
+fn visual_intervals(project: &Project) -> Vec<(f64, f64)> {
+    let mut v = vec![];
+    for track in &project.tracks {
+        for c in track.clips.iter().filter(|c| c.duration > 0.0) {
+            let Some(asset) = c.asset_id.as_deref().and_then(|id| project.asset(id)) else { continue };
+            if is_visual(track.kind, track.hidden, c.kind, asset.kind) {
+                v.push((c.start, c.end()));
+            }
         }
     }
-    let gop = (fps * 2.0).round().max(1.0) as i64;
-    args.extend(["-g", &gop.to_string(), "-r", &f(fps), "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", "-t", &f(duration), &opts.output].map(String::from));
+    v
+}
 
-    Ok(ExportPlan { args, filter_script, ass: ass_text, duration })
+/// Batas bagian [0, t1, t2, ..., durasi] untuk ekspor bertahap. Tiap bagian sepanjang
+/// maksimal `max_len` detik dan sebisa mungkin hanya memuat `max_inputs` klip visual;
+/// batas dipilih di tepi klip bila memungkinkan dan dibulatkan ke frame.
+pub fn split_points(project: &Project, max_inputs: usize, max_len: f64) -> Vec<f64> {
+    let duration = project.duration();
+    let fps = project.canvas.fps.max(1.0);
+    let iv = visual_intervals(project);
+    let count = |a: f64, b: f64| iv.iter().filter(|(s, e)| *s < b - 1e-9 && *e > a + 1e-9).count();
+    let mut cands: Vec<f64> = iv.iter().flat_map(|(s, e)| [*s, *e]).filter(|t| *t > 1e-9 && *t < duration - 1e-9).collect();
+    cands.push(duration);
+    cands.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    cands.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+    let mut bounds = vec![0.0];
+    let mut t0 = 0.0;
+    while t0 < duration - 1e-6 {
+        let limit = (t0 + max_len).min(duration);
+        let inside: Vec<f64> = cands.iter().copied().filter(|c| *c > t0 + 1e-6 && *c <= limit + 1e-9).collect();
+        let best = inside.iter().copied().filter(|c| count(t0, *c) <= max_inputs).last();
+        let mut t1 = match best {
+            Some(c) => c,
+            // Terlalu banyak klip bertumpuk sekaligus: ambil tepi klip terdekat, atau potong di tengah.
+            None => inside.first().copied().unwrap_or(limit),
+        };
+        t1 = ((t1 * fps).round() / fps).min(duration);
+        if t1 <= t0 + 1e-6 {
+            t1 = ((t0 * fps).round() + 1.0) / fps;
+        }
+        let t1 = if duration - t1 < 0.5 / fps { duration } else { t1 };
+        bounds.push(t1);
+        t0 = t1;
+    }
+    bounds
+}
+
+/// Proyek berisi hanya klip visual yang tampil di [t0, t1), digeser ke 0. Klip yang
+/// terpotong menyimpan `offset` (detik sejak awal klip) dan `span` (panjang klip utuh).
+pub fn window_project(project: &Project, t0: f64, t1: f64) -> Project {
+    let mut p = project.clone();
+    p.captions.enabled = false;
+    for track in &mut p.tracks {
+        if track.kind == TrackKind::Audio {
+            track.clips.clear();
+            continue;
+        }
+        let mut clips = vec![];
+        for c in track.clips.iter().filter(|c| c.kind != ClipKind::Text && c.kind != ClipKind::Audio) {
+            let s = c.start.max(t0);
+            let e = c.end().min(t1);
+            if e - s < 1e-6 {
+                continue;
+            }
+            let off = s - c.start;
+            let mut n = c.clone();
+            n.span = if c.span > 0.0 { c.span } else { c.duration };
+            n.offset = c.offset + off;
+            n.start = s - t0;
+            n.duration = e - s;
+            if matches!(c.kind, ClipKind::Video) {
+                n.source_in = c.source_in + off * c.effective_speed();
+            }
+            clips.push(n);
+        }
+        track.clips = clips;
+    }
+    p
+}
+
+fn header() -> Vec<String> {
+    strings(&["-hide_banner", "-y", "-nostats", "-loglevel", "error", "-progress", "pipe:1", "-stats_period", "0.25"])
+}
+
+/// Rencana ekspor lengkap: sekali jalan untuk proyek pendek, bertahap untuk video panjang.
+pub fn build_job(project: &Project, opts: &ExportOptions) -> Result<ExportJob, String> {
+    let duration = check(project, opts)?;
+    let visual_count = visual_intervals(project).len();
+    if visual_count <= MAX_VISUAL_INPUTS && duration <= MAX_SINGLE_PASS_SECONDS {
+        let plan = build_plan(project, opts)?;
+        let mut files = vec![(FILTER_FILE.to_string(), plan.filter_script.clone())];
+        if let Some(a) = &plan.ass {
+            files.push((ASS_FILE.to_string(), a.clone()));
+        }
+        let step = ExportStep { label: "Ekspor".into(), args: plan.args, files, duration, weight: 1.0 };
+        return Ok(ExportJob { steps: vec![step], duration, output: opts.output.clone(), chunked: false });
+    }
+
+    let fps = project.canvas.fps;
+    let bounds = split_points(project, MAX_VISUAL_INPUTS, MAX_CHUNK_SECONDS);
+    let parts = bounds.len() - 1;
+    let (w_audio, w_concat) = (0.06, if opts.normalize_loudness { 0.1 } else { 0.04 });
+    let w_video = 1.0 - w_audio - w_concat;
+    let mut steps = vec![];
+
+    // 1. Seluruh audio sekali jalan ke WAV (decoder audio ringan, jadi semua klip boleh dibuka).
+    let audio_pass = Pass { video: false, audio: true, loudnorm: false, ass: None, filter_file: "cutkit-audio-filter.txt".into(), ass_file: String::new(), duration };
+    let (mut args, filter) = build_pass(project, &audio_pass)?;
+    args.extend(strings(&["-c:a", "pcm_s16le", "-ar", "48000", "-t", &f(duration), "-f", "wav", "cutkit-audio.wav"]));
+    steps.push(ExportStep { label: "Audio".into(), args, files: vec![(audio_pass.filter_file.clone(), filter)], duration, weight: w_audio });
+
+    // 2. Video per bagian.
+    let mut list = String::new();
+    for i in 0..parts {
+        let (t0, t1) = (bounds[i], bounds[i + 1]);
+        let len = t1 - t0;
+        let wp = window_project(project, t0, t1);
+        let ass_text = ass::build_ass_window(project, t0, t1);
+        let pass = Pass {
+            video: true,
+            audio: false,
+            loudnorm: false,
+            ass: ass_text.clone(),
+            filter_file: format!("cutkit-filter-{i}.txt"),
+            ass_file: format!("cutkit-captions-{i}.ass"),
+            duration: len,
+        };
+        let (mut args, filter) = build_pass(&wp, &pass)?;
+        args.extend(video_codec_args(opts, fps));
+        let out = format!("cutkit-part-{i}.mkv");
+        args.extend(strings(&["-an", "-t", &f(len), "-f", "matroska", &out]));
+        let mut files = vec![(pass.filter_file.clone(), filter)];
+        if let Some(a) = ass_text {
+            files.push((pass.ass_file.clone(), a));
+        }
+        steps.push(ExportStep { label: format!("Video bagian {}/{}", i + 1, parts), args, files, duration: len, weight: w_video * len / duration });
+        list.push_str(&format!("file '{out}'\n"));
+    }
+
+    // 3. Gabungkan bagian video (tanpa encode ulang) dengan audio.
+    let mut args = header();
+    args.extend(strings(&["-f", "concat", "-safe", "0", "-i", "cutkit-parts.txt", "-i", "cutkit-audio.wav", "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy"]));
+    if opts.normalize_loudness {
+        args.extend(strings(&["-af", LOUDNORM]));
+    }
+    args.extend(strings(&["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", "-t", &f(duration), &opts.output]));
+    steps.push(ExportStep { label: "Menggabungkan".into(), args, files: vec![("cutkit-parts.txt".into(), list)], duration, weight: w_concat });
+
+    Ok(ExportJob { steps, duration, output: opts.output.clone(), chunked: true })
 }
 
 #[cfg(test)]
@@ -361,7 +605,7 @@ mod tests {
         assert!(a.contains("-ss 2.5 -t 4 -i C:/media/a.mp4"), "video dipangkas di sisi input");
         assert!(a.contains("-f image2 -pattern_type none -loop 1 -framerate 30 -t 2 -i C:/meme/x.png"));
         assert!(a.contains("-t 1.5 -vn -i C:/sfx/boom.mp3"));
-        assert!(a.ends_with("-c:v libx264 -preset medium -crf 20 -profile:v high -g 60 -r 30 -c:a aac -b:a 192k -ar 48000 -movflags +faststart -t 4.5 D:/out/hasil.mp4"));
+        assert!(a.ends_with("-c:v libx264 -preset medium -crf 20 -profile:v high -pix_fmt yuv420p -g 60 -r 30 -c:a aac -b:a 192k -ar 48000 -movflags +faststart -t 4.5 D:/out/hasil.mp4"));
         assert!(a.contains("-/filter_complex cutkit-filter.txt -map [vout] -map [aout]"));
         assert!(plan.ass.is_none());
     }
@@ -398,7 +642,8 @@ mod tests {
         assert!(!a.contains("x.png"), "track tersembunyi dilewati");
         assert!(a.contains("-c:v h264_qsv -preset veryfast -global_quality 26"));
         let g = plan.filter_script;
-        assert!(g.contains("[b1]ass=cutkit-captions.ass,format=nv12[vout]"));
+        assert!(g.contains("[b1]ass=cutkit-captions.ass,format=yuv420p[vout]"));
+        assert!(a.contains("-c:v h264_qsv -preset veryfast -global_quality 26 -pix_fmt nv12"));
         assert!(g.contains("[1:a]anull[aout]"));
         let ass = plan.ass.unwrap();
         assert!(!ass.contains("Hai"), "teks di track tersembunyi tidak dirender");
@@ -473,6 +718,88 @@ mod tests {
         assert_eq!(atempo_chain(1.5), "atempo=1.5");
         assert_eq!(atempo_chain(0.3), "atempo=0.5,atempo=0.6");
         assert_eq!(atempo_chain(0.1), "atempo=0.5,atempo=0.5,atempo=0.5,atempo=0.8");
+    }
+
+    /// Proyek panjang: 40 klip video 5 detik berurutan (200 detik) + musik penuh + logo di atas semuanya.
+    fn long_project() -> Project {
+        let mut p = project();
+        p.tracks[0].clips.clear();
+        p.tracks[1].clips.clear();
+        p.tracks[2].clips.clear();
+        for i in 0..40 {
+            p.tracks[0].clips.push(Clip { id: format!("c{i}"), asset_id: Some("vid".into()), start: i as f64 * 5.0, duration: 5.0, source_in: 1.0, ..Default::default() });
+        }
+        p.tracks[1].clips.push(Clip { id: "logo".into(), kind: ClipKind::Image, asset_id: Some("img".into()), start: 0.0, duration: 200.0, motion: Motion { kind: "zoom-in".into(), amount: 0.2 }, ..Default::default() });
+        p.tracks[2].clips.push(Clip { id: "music".into(), kind: ClipKind::Audio, asset_id: Some("sfx".into()), start: 0.0, duration: 2.0, ..Default::default() });
+        p.captions.enabled = true;
+        p.captions.words = (0..100).map(|i| Word { text: format!("k{i}"), start: i as f64 * 2.0, end: i as f64 * 2.0 + 1.5 }).collect();
+        p
+    }
+
+    #[test]
+    fn short_projects_export_in_one_step() {
+        let job = build_job(&project(), &opts()).unwrap();
+        assert!(!job.chunked);
+        assert_eq!(job.steps.len(), 1);
+        assert_eq!(job.steps[0].files[0].0, FILTER_FILE);
+    }
+
+    #[test]
+    fn split_points_respect_input_limit_and_clip_edges() {
+        let p = long_project();
+        let b = split_points(&p, 16, 120.0);
+        assert_eq!(b.first(), Some(&0.0));
+        assert_eq!(b.last(), Some(&200.0));
+        for w in b.windows(2) {
+            assert!(w[1] - w[0] <= 120.0 + 1e-9);
+            // logo selalu ada + paling banyak 15 klip utama per bagian, dan batas jatuh di tepi klip (kelipatan 5)
+            let n = p.tracks[0].clips.iter().filter(|c| c.start < w[1] - 1e-9 && c.end() > w[0] + 1e-9).count();
+            assert!(n + 1 <= 16, "{w:?} memuat {n} klip");
+            assert!((w[1] % 5.0).abs() < 1e-9 || (w[1] - 200.0).abs() < 1e-9);
+        }
+        assert_eq!(b, vec![0.0, 75.0, 150.0, 200.0]);
+    }
+
+    #[test]
+    fn window_project_offsets_cut_clips() {
+        let mut p = long_project();
+        p.tracks[0].clips[0].speed = 2.0;
+        p.tracks[0].clips[0].duration = 7.0;
+        let w = window_project(&p, 3.0, 10.0);
+        let c0 = &w.tracks[0].clips[0];
+        assert_eq!((c0.start, c0.duration, c0.offset, c0.span), (0.0, 4.0, 3.0, 7.0));
+        assert_eq!(c0.source_in, 1.0 + 3.0 * 2.0, "masuk sumber maju sesuai kecepatan");
+        let logo = &w.tracks[1].clips[0];
+        assert_eq!((logo.start, logo.duration, logo.offset, logo.span), (0.0, 7.0, 3.0, 200.0));
+        assert!(w.tracks[2].clips.is_empty(), "audio dirender terpisah");
+        assert!(!w.captions.enabled);
+        // Gerak logo melanjutkan dari frame ke-90 dari 6000, bukan mulai dari awal.
+        let (_, filter) = build_pass(&w, &Pass { video: true, audio: false, loudnorm: false, ass: None, filter_file: "x".into(), ass_file: "y".into(), duration: 7.0 }).unwrap();
+        assert!(filter.contains("zoompan=z='1+0.2*min((on+90)/5999,1)'"), "{filter}");
+    }
+
+    #[test]
+    fn long_projects_export_in_parts_then_concat() {
+        let job = build_job(&long_project(), &ExportOptions { normalize_loudness: true, ..opts() }).unwrap();
+        assert!(job.chunked);
+        let labels: Vec<&str> = job.steps.iter().map(|s| s.label.as_str()).collect();
+        assert_eq!(labels, vec!["Audio", "Video bagian 1/3", "Video bagian 2/3", "Video bagian 3/3", "Menggabungkan"]);
+        let total: f64 = job.steps.iter().map(|s| s.weight).sum();
+        assert!((total - 1.0).abs() < 1e-9);
+        let audio = job.steps[0].args.join(" ");
+        assert!(audio.contains("-vn -i C:/media/a.mp4") && audio.ends_with("-c:a pcm_s16le -ar 48000 -t 200 -f wav cutkit-audio.wav"));
+        assert!(!audio.contains("x.png"), "gambar tidak dibuka di pass audio");
+        let part = job.steps[2].args.join(" ");
+        assert!(part.contains("-ss 1 -t 5 -an -i C:/media/a.mp4"));
+        assert_eq!(part.matches("-i C:/media/a.mp4").count(), 15, "bagian 2 hanya membuka klip 75..150 detik");
+        assert!(part.ends_with("-an -t 75 -f matroska cutkit-part-1.mkv"));
+        let ass_file = &job.steps[2].files[1];
+        assert_eq!(ass_file.0, "cutkit-captions-1.ass");
+        assert!(ass_file.1.contains("Dialogue: 0,0:00:01.00,"), "kata pada detik 76 jadi detik 1 di bagian 2");
+        let concat = job.steps[4].args.join(" ");
+        assert!(concat.contains("-f concat -safe 0 -i cutkit-parts.txt -i cutkit-audio.wav -map 0:v:0 -map 1:a:0 -c:v copy -af loudnorm"));
+        assert!(concat.ends_with("-movflags +faststart -t 200 D:/out/hasil.mp4"));
+        assert_eq!(job.steps[4].files[0].1, "file 'cutkit-part-0.mkv'\nfile 'cutkit-part-1.mkv'\nfile 'cutkit-part-2.mkv'\n");
     }
 
     #[test]

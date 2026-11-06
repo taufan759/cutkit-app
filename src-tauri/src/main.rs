@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use cutkit_core::ffmpeg;
 use cutkit_core::proxy::{filmstrip_args, filmstrip_count, proxy_args, proxy_extension, waveform_args};
-use cutkit_core::{build_plan, AssetKind, ExportOptions, MediaInfo, Project, Tools};
+use cutkit_core::{build_job, build_plan, AssetKind, ExportOptions, MediaInfo, Project, Tools};
 use serde::Serialize;
 use tauri::async_runtime::spawn_blocking;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -216,7 +216,7 @@ fn path_exists(path: String) -> bool {
 #[tauri::command]
 fn export_start(app: AppHandle, project: Project, options: ExportOptions, state: State<AppState>) -> Result<(), String> {
     let tools = state.tools()?;
-    let plan = build_plan(&project, &options)?;
+    let job = build_job(&project, &options)?;
     let cancel = Arc::new(AtomicBool::new(false));
     {
         let mut slot = state.export_cancel.lock().map_err(|e| e.to_string())?;
@@ -228,7 +228,7 @@ fn export_start(app: AppHandle, project: Project, options: ExportOptions, state:
     let work = state.cache_dir.join("export").join(format!("{}", std::process::id()));
     std::thread::spawn(move || {
         let app2 = app.clone();
-        let result = ffmpeg::run_export(&tools.ffmpeg, &work, &plan, cancel, move |p| {
+        let result = ffmpeg::run_job(&tools.ffmpeg, &work, &job, cancel, move |p| {
             let _ = app2.emit("export-progress", p);
         });
         let _ = std::fs::remove_dir_all(&work);

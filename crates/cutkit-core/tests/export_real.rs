@@ -2,7 +2,7 @@
 //! (video utama, overlay gambar berputar, SFX, teks, caption), mengekspor, lalu
 //! memeriksa hasilnya dengan ffprobe. Dilewati bila ffmpeg tidak ditemukan.
 
-use cutkit_core::ffmpeg::{find_tools, probe, run, run_export};
+use cutkit_core::ffmpeg::{find_tools, probe, run, run_export, run_job};
 use cutkit_core::*;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -208,4 +208,71 @@ fn export_with_effects() {
     // Loudness diratakan mendekati -14 LUFS.
     let lufs = integrated_lufs(&tools.ffmpeg, &o);
     assert!((lufs + 14.0).abs() < 3.0, "loudness {lufs} LUFS");
+}
+
+#[test]
+fn long_project_exports_in_parts() {
+    let Some(tools) = find_tools(None) else {
+        eprintln!("ffmpeg tidak ditemukan, tes video panjang dilewati");
+        return;
+    };
+    let dir = tmp_dir("long");
+    let s = |p: &PathBuf| p.to_string_lossy().to_string();
+    let ff = |args: &[&str]| run(&tools.ffmpeg, &args.iter().map(|a| a.to_string()).collect::<Vec<_>>()).unwrap();
+    let clip = dir.join("klip.mp4");
+    ff(&["-hide_banner", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=320x180:r=30:d=3", "-f", "lavfi", "-i", "sine=f=330:d=3", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", &s(&clip)]);
+    let logo = dir.join("logo.png");
+    ff(&["-hide_banner", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "nullsrc=s=200x200:d=1,geq=lum='X*255/W':cb=128:cr=128", "-frames:v", "1", "-update", "1", &s(&logo)]);
+    let vi = probe(&tools.ffprobe, &s(&clip)).unwrap();
+
+    let mut p = Project::new("panjang");
+    p.canvas = Canvas { width: 640, height: 360, fps: 30.0, background: "#000000".into() };
+    p.assets.push(Asset { id: "v".into(), path: s(&clip), kind: AssetKind::Video, duration: vi.duration, width: 320, height: 180, has_audio: true, has_video: true, ..Default::default() });
+    p.assets.push(Asset { id: "l".into(), path: s(&logo), kind: AssetKind::Image, width: 200, height: 200, has_video: true, ..Default::default() });
+    for i in 0..20 {
+        p.tracks[0].clips.push(Clip { id: format!("c{i}"), asset_id: Some("v".into()), start: i as f64, duration: 1.0, source_in: (i % 2) as f64, ..Default::default() });
+    }
+    // Logo kecil di pojok sepanjang video, zoom pelan melintasi batas bagian.
+    p.tracks[1].clips.push(Clip {
+        id: "logo".into(),
+        kind: ClipKind::Image,
+        asset_id: Some("l".into()),
+        start: 0.0,
+        duration: 20.0,
+        transform: Transform { x: 220.0, y: -100.0, scale: 0.3, ..Default::default() },
+        motion: Motion { kind: "zoom-in".into(), amount: 1.0 },
+        ..Default::default()
+    });
+    p.captions.enabled = true;
+    p.captions.style.size = 30.0;
+    p.captions.words = (0..10).map(|i| Word { text: format!("kata{i}"), start: i as f64 * 2.0, end: i as f64 * 2.0 + 1.8 }).collect();
+
+    let out = dir.join("panjang.mp4");
+    let job = build_job(&p, &ExportOptions { output: s(&out), quality: Quality::Fast, ..Default::default() }).unwrap();
+    assert!(job.chunked, "20 klip visual > batas, harus bertahap");
+    assert_eq!(job.steps.len(), 4, "audio + 2 bagian + gabung");
+    let mut last = 0.0;
+    let mut steps_seen = std::collections::BTreeSet::new();
+    run_job(&tools.ffmpeg, &dir.join("kerja"), &job, Arc::new(AtomicBool::new(false)), |pr| {
+        assert!(pr.percent + 1e-9 >= last, "progres mundur: {} -> {}", last, pr.percent);
+        last = pr.percent;
+        steps_seen.insert(pr.step.clone());
+    })
+    .expect("ekspor bertahap");
+    assert!(steps_seen.contains("Video bagian 2/2") && steps_seen.contains("Menggabungkan"));
+    let info = probe(&tools.ffprobe, &s(&out)).unwrap();
+    assert!((info.duration - 20.0).abs() < 0.15, "durasi {}", info.duration);
+    assert!(info.has_audio && info.playable);
+    // Jumlah frame tepat 20 x 30 (bagian digabung tanpa frame hilang/dobel).
+    let frames = std::process::Command::new(&tools.ffprobe)
+        .args(["-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", &s(&out)])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&frames.stdout).trim(), "600");
+    // Zoom logo bersambung di batas bagian (detik 16): tidak melompat kembali ke awal.
+    let before = pixel(&tools.ffmpeg, &s(&out), 15.9, 515, 55)[0] as i32;
+    let after = pixel(&tools.ffmpeg, &s(&out), 16.1, 515, 55)[0] as i32;
+    let start = pixel(&tools.ffmpeg, &s(&out), 0.1, 515, 55)[0] as i32;
+    assert!((before - after).abs() < 12, "zoom melompat di batas bagian: {before} -> {after}");
+    assert!((after - start).abs() > 12, "zoom tidak berjalan: awal {start}, detik 16 {after}");
 }

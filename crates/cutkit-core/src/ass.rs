@@ -181,13 +181,28 @@ fn alpha_tags(style: &TextStyle, opacity: f64) -> String {
     format!("\\1a{}\\3a{}\\4a{}", a(&style.color), a(&style.outline_color), a(&back))
 }
 
+/// Satu baris Dialogue: waktu disimpan terpisah agar bisa dipotong per bagian ekspor.
+struct Event {
+    layer: usize,
+    start: f64,
+    end: f64,
+    /// "Style,,0,0,0,,teks"
+    rest: String,
+}
+
 /// Membuat seluruh file ASS untuk proyek: caption (layer 0) dan klip teks (layer 1+).
 /// Mengembalikan None bila tidak ada apa pun yang perlu dirender.
 pub fn build_ass(project: &Project) -> Option<String> {
+    build_ass_window(project, 0.0, f64::INFINITY)
+}
+
+/// File ASS untuk potongan waktu [t0, t1) dengan waktu digeser ke 0 (ekspor bertahap
+/// video panjang). Halaman caption dihitung dari seluruh kata, jadi sama dengan ekspor sekali jalan.
+pub fn build_ass_window(project: &Project, t0: f64, t1: f64) -> Option<String> {
     let w = project.canvas.width;
     let h = project.canvas.height;
     let mut styles = vec![];
-    let mut events = vec![];
+    let mut events: Vec<Event> = vec![];
 
     if project.captions.enabled {
         let st: &CaptionStyle = &project.captions.style;
@@ -226,13 +241,7 @@ pub fn build_ass(project: &Project) -> Option<String> {
                     })
                     .collect::<Vec<_>>()
                     .join("\\N");
-                events.push(format!(
-                    "Dialogue: 0,{},{},Cap,,0,0,0,,{{\\an5\\pos({},{})}}{text}",
-                    ass_time(cue.start),
-                    ass_time(cue.end),
-                    fmt(cx),
-                    fmt(cy)
-                ));
+                events.push(Event { layer: 0, start: cue.start, end: cue.end, rest: format!("Cap,,0,0,0,,{{\\an5\\pos({},{})}}{text}", fmt(cx), fmt(cy)) });
             }
         }
     }
@@ -255,6 +264,11 @@ pub fn build_ass(project: &Project) -> Option<String> {
         }
     }
 
+    let events: Vec<Event> = events
+        .into_iter()
+        .filter(|e| e.end > t0 + 1e-9 && e.start < t1 - 1e-9)
+        .map(|e| Event { start: (e.start - t0).max(0.0), end: e.end.min(t1) - t0, ..e })
+        .collect();
     if events.is_empty() {
         return None;
     }
@@ -269,13 +283,12 @@ pub fn build_ass(project: &Project) -> Option<String> {
     }
     out.push_str("\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n");
     for e in events {
-        out.push_str(&e);
-        out.push('\n');
+        out.push_str(&format!("Dialogue: {},{},{},{}\n", e.layer, ass_time(e.start), ass_time(e.end), e.rest));
     }
     Some(out)
 }
 
-fn text_event(style: &str, layer: usize, clip: &Clip, ts: &TextStyle, text: &str, w: u32, h: u32) -> String {
+fn text_event(style: &str, layer: usize, clip: &Clip, ts: &TextStyle, text: &str, w: u32, h: u32) -> Event {
     let t = clip.transform;
     let cx = w as f64 / 2.0 + t.x;
     let cy = h as f64 / 2.0 + t.y;
@@ -290,7 +303,7 @@ fn text_event(style: &str, layer: usize, clip: &Clip, ts: &TextStyle, text: &str
         tags.push_str(&format!("\\fscx{s}\\fscy{s}\\bord{}\\shad{}", fmt(ts.outline * t.scale), fmt(ts.shadow * t.scale)));
     }
     tags.push_str(&alpha_tags(ts, t.opacity));
-    format!("Dialogue: {layer},{},{},{style},,0,0,0,,{{{tags}}}{text}", ass_time(clip.start), ass_time(clip.end()))
+    Event { layer, start: clip.start, end: clip.end(), rest: format!("{style},,0,0,0,,{{{tags}}}{text}") }
 }
 
 #[cfg(test)]
@@ -355,6 +368,13 @@ mod tests {
         p.captions.style.animation = "pop".into();
         let popped = build_ass(&p).unwrap();
         assert!(popped.contains("{\\c&H00E6FF&\\fscx144\\fscy144\\t(0,120,\\fscx115\\fscy115)}HALO{\\r} DUNIA"), "{popped}");
+
+        // Potongan waktu: event digeser ke 0 dan dipotong di batas jendela.
+        let win = build_ass_window(&p, 0.5, 2.0).unwrap();
+        assert!(win.contains("Dialogue: 0,0:00:00.00,0:00:00.50,Cap"), "{win}");
+        assert!(win.contains("Dialogue: 2,0:00:00.50,0:00:01.50,T1"), "{win}");
+        assert!(!win.contains("HALO{\\r} DUNIA\n") || win.matches("Cap,,").count() == 1);
+        assert!(build_ass_window(&p, 10.0, 12.0).is_none());
 
         p.captions.enabled = false;
         p.tracks[1].clips.clear();
