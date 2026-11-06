@@ -475,6 +475,13 @@ async fn tts(text: String, length_scale: f64, gap: f64, out_path: String, state:
     .await
 }
 
+/// Deteksi ketukan musik pada file audio/video (waktu relatif terhadap awal file).
+#[tauri::command]
+async fn detect_beats(path: String, state: State<'_, AppState>) -> Result<Option<cutkit_core::beats::BeatInfo>, String> {
+    let tools = state.tools()?;
+    blocking(move || cutkit_core::beats::detect(&tools.ffmpeg, &path, 0.0, 0.0)).await
+}
+
 #[tauri::command]
 fn open_path(app: AppHandle, path: String) -> Result<(), String> {
     app.opener().open_path(path, None::<&str>).map_err(|e| e.to_string())
@@ -528,6 +535,7 @@ fn main() {
             ai_cancel,
             transcribe,
             tts,
+            detect_beats,
             open_path,
             reveal_path
         ])

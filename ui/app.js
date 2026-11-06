@@ -816,6 +816,22 @@ function applyCaptionPreset(p, preset) {
   Object.assign(p.captions.style, st);
 }
 
+/* ---------- ketukan musik ---------- */
+
+async function detectBeats(asset) {
+  toast("Mendeteksi ketukan…");
+  try {
+    const info = await invoke("detect_beats", { path: asset.path });
+    if (!info) return toast("Tidak menemukan ketukan yang jelas di audio ini.", true);
+    setExtra(asset, { beats: info });
+    markDirty();
+    tlView.render();
+    renderInspector();
+    toast(`${info.bpm} BPM, ${info.beats.length} ketukan.`);
+    return info;
+  } catch (e) { toast(errMsg(e), true); return null; }
+}
+
 /* ---------- TTS offline (Piper) ---------- */
 
 const TTS_MODELS = ["piper-engine", "piper-id", "piper-id-config"];
@@ -1318,6 +1334,23 @@ function renderInspector() {
       el("p", { class: "hint" }, "Durasi di timeline ikut berubah dan klip sesudahnya bergeser. Suara dipercepat tanpa mengubah nada.")));
   }
 
+  if (asset && asset.has_audio && (c.kind === "audio" || c.kind === "video")) {
+    const tracks = state.project.tracks.filter((t) => t.kind === "video");
+    const syncSel = el("select", {}, tracks.map((t) => el("option", { value: t.id }, t.name)));
+    sections.push(el("section", {},
+      el("h4", {}, "Ketukan musik"),
+      asset.beats
+        ? el("p", { class: "hint" }, `${asset.beats.bpm} BPM · ${asset.beats.beats.length} ketukan. Garis kuning di klip = ketukan, tebal = awal birama; potongan klip lain menempel ke sini.`)
+        : el("p", { class: "hint" }, "Deteksi tempo dan ketukan untuk memotong gambar tepat di ketukan."),
+      el("div", { class: "btn-row" },
+        el("button", { class: "btn small", onclick: () => detectBeats(asset) }, asset.beats ? "Deteksi ulang" : "🥁 Deteksi ketukan"),
+        asset.beats ? syncSel : null,
+        asset.beats ? el("button", { class: "btn small primary", onclick: () => {
+          const n = commit((pp) => TL.syncToBeats(pp, syncSel.value, TL.beatTimes(pp), 0.5));
+          toast(n ? `${n} potongan digeser ke ketukan.` : "Tidak ada potongan yang dekat ketukan (maks 0,5 detik).");
+        } }, "Sinkronkan potongan") : null)));
+  }
+
   if (c.kind === "audio" || (c.kind === "video" && asset && asset.has_audio)) {
     sections.push(el("section", {},
       el("h4", {}, "Audio"),
@@ -1562,6 +1595,7 @@ function quickDialog(opts = {}) {
     row("Musik latar", el("button", { class: "btn small", onclick: pickFile("music", [{ name: "Audio", extensions: AUDIO_EXT }]) }, "Pilih…"), el("button", { class: "btn small ghost", onclick: clear("music") }, "Kosongkan")),
     row("Volume musik", vol, volLabel),
     row("Gambar", segmented([["cover", "Penuh layar"], ["contain", "Utuh (ada pinggiran)"]], sel.fit, (v) => { sel.fit = v; })),
+    row("Ketukan", el("label", { class: "check" }, el("input", { type: "checkbox", checked: sel.onBeat, onchange: (e) => { sel.onBeat = e.target.checked; } }), "Ganti gambar tepat di ketukan musik (butuh musik latar)")),
     row("Gerak", el("label", { class: "check" }, el("input", { type: "checkbox", checked: sel.motion, onchange: (e) => { sel.motion = e.target.checked; } }), "Zoom pelan otomatis di gambar (Ken Burns)")),
     row("Gaya caption", segmented(CAPTION_PRESETS.map((pr, i) => [i, pr.name]), sel.capPreset, (v) => { sel.capPreset = v; })),
     script,
@@ -1594,8 +1628,13 @@ async function runQuick(sel, newName) {
     const end = voice ? voice.duration : visuals.length * TL.STILL_DURATION;
     words = CAP.textToWords(sel.script, 0, end);
   }
+  let beats = null;
+  if (sel.onBeat && music) {
+    const info = music.beats || (await detectBeats(music));
+    if (info) beats = (info.downbeats.length >= visuals.length ? info.downbeats : info.beats);
+  }
   commit((p) => {
-    TL.autoAssemble(p, { voice, visuals, music, words, musicVolume: sel.musicVolume / 100, fit: sel.fit, motion: sel.motion !== false });
+    TL.autoAssemble(p, { voice, visuals, music, words, musicVolume: sel.musicVolume / 100, fit: sel.fit, motion: sel.motion !== false, beats });
     applyCaptionPreset(p, CAPTION_PRESETS[sel.capPreset]);
   }, { captions: true });
   closeModal();

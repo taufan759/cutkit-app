@@ -3,6 +3,7 @@
 
 pub mod ai;
 pub mod ass;
+pub mod beats;
 pub mod demo;
 pub mod export;
 pub mod ffmpeg;

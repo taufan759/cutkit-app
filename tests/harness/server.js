@@ -44,6 +44,9 @@ const AI_MODELS = [
   { id: "whisper-small", kind: "whisper", label: "Seimbang (small) — disarankan", note: "190 MB", file: "ggml-small-q5_1.bin", size: 190085487 },
   { id: "whisper-medium", kind: "whisper", label: "Akurat (medium)", note: "539 MB", file: "ggml-medium-q5_0.bin", size: 539212467 },
   { id: "vad-silero", kind: "vad", label: "Deteksi suara (Silero VAD)", note: "0,9 MB", file: "ggml-silero-v6.2.0.bin", size: 885098 },
+  { id: "piper-engine", kind: "piper-engine", label: "Mesin TTS Piper", note: "22 MB", file: "piper/piper.exe", size: null },
+  { id: "piper-id", kind: "piper-voice", label: "Suara Indonesia (news_tts)", note: "63 MB", file: "id_ID-news_tts-medium.onnx", size: 62950044 },
+  { id: "piper-id-config", kind: "piper-config", label: "Pengaturan suara Indonesia", note: "5 KB", file: "id_ID-news_tts-medium.onnx.json", size: 5050 },
 ];
 fs.mkdirSync(CACHE, { recursive: true });
 
@@ -85,7 +88,7 @@ const commands = {
     return { voice: f("01-narasi.wav"), music: f("musik.wav"), visuals: ["01-latar.png", "02-klip.mp4", "03-latar.png", "04-klip.mp4", "05-latar.png"].map(f), script: "Halo semua! Ini contoh proyek CutKit. Coba potong klip, tambah meme dan caption, lalu ekspor video kamu." };
   },
   // AI: memakai model asli di folder model bila ada (unduh lewat aplikasi; harness tidak mengunduh).
-  ai_models: () => ({ models_dir: MODELS_DIR, models: AI_MODELS.map((m) => ({ ...m, installed: fs.existsSync(path.join(MODELS_DIR, m.file)) && fs.statSync(path.join(MODELS_DIR, m.file)).size === m.size })) }),
+  ai_models: () => ({ models_dir: MODELS_DIR, models: AI_MODELS.map((m) => ({ ...m, installed: fs.existsSync(path.join(MODELS_DIR, m.file)) && (m.size == null || fs.statSync(path.join(MODELS_DIR, m.file)).size === m.size) })) }),
   set_models_dir: () => null,
   ai_cancel: () => null,
   ai_download: ({ id }) => {
@@ -133,6 +136,7 @@ const commands = {
     const timed = sentences.map((s, i) => { if (i) t += gap; const r = { text: s, start: t, end: t + durs[i] }; t += durs[i]; return r; });
     return { path: outPath, duration: t, sentences: timed };
   },
+  detect_beats: () => ({ bpm: 120, beats: Array.from({ length: 120 }, (_, i) => +(0.25 + i * 0.5).toFixed(3)), downbeats: Array.from({ length: 30 }, (_, i) => +(0.25 + i * 2).toFixed(3)) }),
   open_path: () => null,
   reveal_path: () => null,
 };

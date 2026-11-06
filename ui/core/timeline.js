@@ -580,6 +580,54 @@
     });
   }
 
+  /** Waktu ketukan (timeline) dari klip audio/video yang asetnya sudah dianalisis. */
+  function beatTimes(p, opts = {}) {
+    const out = [];
+    for (const t of p.tracks) for (const c of t.clips) {
+      const a = c.asset_id ? getAsset(p, c.asset_id) : null;
+      if (!a || !a.beats || (c.kind !== "audio" && c.kind !== "video")) continue;
+      const list = opts.downbeats ? a.beats.downbeats : a.beats.beats;
+      const sp = speedOf(c);
+      for (const b of list) {
+        const t2 = c.start + (b - c.in) / sp;
+        if (t2 >= c.start - EPS && t2 <= clipEnd(c) + EPS) out.push(round(t2));
+      }
+    }
+    return out.sort((x, y) => x - y);
+  }
+
+  /**
+   * Menggeser setiap titik potong antar klip yang bersambung di track ke ketukan terdekat
+   * (maks `reach` detik). Klip kiri diperpanjang/dipendekkan, klip kanan maju/mundur
+   * bersama sumbernya, sehingga tidak ada celah. Mengembalikan jumlah potongan yang digeser.
+   */
+  function syncToBeats(p, trackId, beats, reach = 0.5) {
+    const track = getTrack(p, trackId);
+    if (!track || !beats.length) return 0;
+    sortClips(track);
+    let moved = 0;
+    for (let i = 0; i + 1 < track.clips.length; i++) {
+      const a = track.clips[i], b = track.clips[i + 1];
+      const cut = clipEnd(a);
+      if (Math.abs(b.start - cut) > 0.01) continue; // hanya potongan yang bersambung
+      let best = null;
+      for (const t of beats) if (Math.abs(t - cut) <= reach && (best === null || Math.abs(t - cut) < Math.abs(best - cut))) best = t;
+      if (best === null || Math.abs(best - cut) < 1e-3) continue;
+      // Batas: klip tetap >= MIN_DURATION dan sumber video tidak habis.
+      const lo = Math.max(a.start + MIN_DURATION, b.kind === "video" || b.kind === "audio" ? b.start - b.in / speedOf(b) : -Infinity);
+      const hiA = a.kind === "video" || a.kind === "audio" ? a.start + (sourceLimit(p, a) - a.in) / speedOf(a) : Infinity;
+      const hi = Math.min(clipEnd(b) - MIN_DURATION, hiA);
+      if (best < lo || best > hi) continue;
+      const delta = best - cut;
+      a.duration = round(a.duration + delta);
+      if (b.kind === "video" || b.kind === "audio") b.in = round(Math.max(0, b.in + delta * speedOf(b)));
+      b.start = round(best);
+      b.duration = round(b.duration - delta);
+      moved++;
+    }
+    return moved;
+  }
+
   /**
    * Menyusun timeline otomatis ala "voice over + gambar":
    *  - voice (aset audio, opsional) di track audio pertama
@@ -589,7 +637,7 @@
    *  - words (opsional) jadi caption
    * Isi timeline lama dihapus. Mengembalikan durasi total.
    */
-  function autoAssemble(p, { voice = null, visuals = [], music = null, words = null, musicVolume = 0.15, fit = "cover", motion = false } = {}) {
+  function autoAssemble(p, { voice = null, visuals = [], music = null, words = null, musicVolume = 0.15, fit = "cover", motion = false, beats = null } = {}) {
     if (!visuals.length && !voice) throw new Error("Pilih minimal satu voice over atau gambar/video.");
     for (const t of p.tracks) t.clips = [];
     const wordsEnd = words && words.length ? Math.max(...words.map((w) => w.end)) : 0;
@@ -606,7 +654,8 @@
       const ends = [];
       let t = 0;
       for (let i = 0; i < durs.length - 1; i++) { t += durs[i]; ends.push(t); }
-      const cuts = snapCuts(ends, words);
+      // Potongan ditempel ke ketukan musik bila diminta, kalau tidak ke awal kata.
+      const cuts = beats && beats.length ? snapCuts(ends, beats.map((t) => ({ start: t }))) : snapCuts(ends, words);
       // Potongan harus tetap naik dan tiap klip minimal MIN_DURATION.
       for (let i = 0; i < cuts.length; i++) {
         const lo = (i ? cuts[i - 1] : 0) + MIN_DURATION;
@@ -650,7 +699,7 @@
   }
 
   return {
-    allocate, snapCuts, autoAssemble, speedOf, sourceTime, setSpeed,
+    allocate, snapCuts, autoAssemble, beatTimes, syncToBeats, speedOf, sourceTime, setSpeed,
     MIN_DURATION, STILL_DURATION, RATIOS, RATIO_LABELS, styleScale,
     uid, newProject, normalize, normalizeClip, defaultTextStyle, defaultCaptionStyle, defaultTransform,
     clipEnd, duration, getTrack, getAsset, findClip, trackAccepts, overlaps, findFreeStart,

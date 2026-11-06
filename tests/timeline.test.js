@@ -292,3 +292,37 @@ test("video panjang: preset 16:9/4K, caption lanskap, history dibatasi ukuran", 
   assert.ok(h.undoStack.length <= 4, `tersisa ${h.undoStack.length}`);
   assert.ok(h.canUndo);
 });
+
+test("ketukan: waktu di timeline mengikuti posisi, in, dan kecepatan klip musik", () => {
+  const p = T.newProject();
+  p.assets.push({ id: "m", kind: "audio", duration: 30, has_audio: true, beats: { bpm: 120, beats: [0.5, 1, 1.5, 2, 2.5, 3], downbeats: [0.5, 2.5] } });
+  const c = T.insertClip(p, "a1", T.clipFromAsset(p.assets[0]), 10);
+  c.in = 1; c.duration = 1;
+  assert.deepEqual(T.beatTimes(p), [10, 10.5, 11]);
+  c.speed = 2;
+  assert.deepEqual(T.beatTimes(p), [10, 10.25, 10.5, 10.75, 11]);
+  assert.deepEqual(T.beatTimes(p, { downbeats: true }), [10.75]);
+});
+
+test("syncToBeats menggeser potongan ke ketukan terdekat tanpa celah", () => {
+  const p = T.newProject();
+  p.assets.push({ id: "i", kind: "image", width: 10, height: 10 });
+  p.assets.push({ id: "v", kind: "video", duration: 10, width: 10, height: 10 });
+  const a = T.insertClip(p, "v1", T.clipFromAsset(p.assets[0]));
+  const b = T.insertClip(p, "v1", T.clipFromAsset(p.assets[1]));
+  b.in = 2; b.duration = 4;
+  const n = T.syncToBeats(p, "v1", [2.8, 3.4, 9], 0.5);
+  assert.equal(n, 1);
+  assert.equal(a.duration, 2.8);
+  assert.equal(b.start, 2.8);
+  assert.equal(b.in, 1.8, "sumber klip kanan ikut mundur");
+  assert.equal(T.clipEnd(b), 7);
+  assert.equal(T.syncToBeats(p, "v1", [20], 0.5), 0, "ketukan di luar jangkauan diabaikan");
+});
+
+test("autoAssemble memotong gambar di ketukan musik", () => {
+  const p = T.newProject();
+  const vis = ["a", "b", "c"].map((id) => ({ id, kind: "image", width: 1, height: 1 }));
+  T.autoAssemble(p, { voice: { id: "vo", kind: "audio", duration: 9, has_audio: true }, visuals: vis, beats: [2.6, 3.2, 5.9, 6.4] });
+  assert.deepEqual(p.tracks[0].clips.map((c) => c.start), [0, 3.2, 5.9]);
+});

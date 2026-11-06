@@ -206,6 +206,17 @@
       if (Math.abs(TL.speedOf(clip) - 1) > 1e-3) badges.push(`${+TL.speedOf(clip).toFixed(2)}x`);
       if (clip.kind !== "text" && clip.kind !== "image" && Math.abs(clip.volume - 1) > 1e-3) badges.push(`${Math.round(clip.volume * 100)}%`);
       if (badges.length) node.append(el("div", { class: "clip-vol" }, badges.join(" · ")));
+      if (asset && asset.beats && (clip.kind === "audio" || clip.kind === "video")) {
+        const sp = TL.speedOf(clip);
+        const marks = asset.beats.beats.filter((b) => b >= clip.in && b <= clip.in + clip.duration * sp);
+        const down = new Set(asset.beats.downbeats);
+        // Terlalu rapat untuk dilihat bila zoom jauh: tampilkan ketukan kuat saja.
+        const dense = (60 / asset.beats.bpm / sp) * this.pps < 6;
+        for (const b of marks) {
+          if (dense && !down.has(b)) continue;
+          node.append(el("div", { class: "beat" + (down.has(b) ? " down" : ""), style: `left:${this.timeToX((b - clip.in) / sp)}px` }));
+        }
+      }
       if (clip.fade_in > 0) node.append(el("div", { class: "fade in", style: `width:${this.timeToX(clip.fade_in)}px` }));
       if (clip.fade_out > 0) node.append(el("div", { class: "fade out", style: `width:${this.timeToX(clip.fade_out)}px` }));
       node.append(el("div", { class: "h-l", title: "Pangkas awal" }), el("div", { class: "h-r", title: "Pangkas akhir" }));
@@ -280,6 +291,7 @@
       const p = this.project;
       const extra = [];
       if (p.captions.enabled) for (const w of p.captions.words) extra.push(w.start);
+      for (const b of TL.beatTimes(p)) extra.push(b);
       return TL.snap(p, t, SNAP_PX / this.pps, { playhead: this.host.time(), exclude, extra });
     }
 
