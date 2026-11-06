@@ -130,6 +130,8 @@ pub struct Clip {
     pub color: crate::color::ColorAdjust,
     /// Hanya untuk klip efek.
     pub effect: Option<Effect>,
+    /// Animasi transform: keyframe berurutan (t = detik sejak awal klip), interpolasi linear.
+    pub keyframes: Vec<Keyframe>,
     pub text: Option<TextClip>,
     /// Hanya saat ekspor bertahap: detik sejak awal klip asli (klip terpotong di batas bagian).
     #[serde(skip)]
@@ -161,6 +163,7 @@ impl Default for Clip {
             transition: Transition::default(),
             color: crate::color::ColorAdjust::default(),
             effect: None,
+            keyframes: vec![],
             text: None,
             offset: 0.0,
             span: 0.0,
@@ -204,6 +207,51 @@ impl Default for Transform {
     fn default() -> Self {
         Transform { x: 0.0, y: 0.0, scale: 1.0, rotation: 0.0, opacity: 1.0 }
     }
+}
+
+/// Satu keyframe transform. `t` = detik sejak awal klip.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[serde(default)]
+pub struct Keyframe {
+    pub t: f64,
+    pub x: f64,
+    pub y: f64,
+    pub scale: f64,
+    pub rotation: f64,
+    pub opacity: f64,
+}
+
+impl Default for Keyframe {
+    fn default() -> Self {
+        Keyframe { t: 0.0, x: 0.0, y: 0.0, scale: 1.0, rotation: 0.0, opacity: 1.0 }
+    }
+}
+
+impl Keyframe {
+    pub fn transform(&self) -> Transform {
+        Transform { x: self.x, y: self.y, scale: self.scale, rotation: self.rotation, opacity: self.opacity }
+    }
+}
+
+/// Ekspresi ffmpeg sepotong-sepotong linear untuk nilai keyframe pada waktu `t` filter.
+/// `t0` = waktu filter saat klip berada di detik lokal 0.
+pub fn keyframe_expr(kfs: &[Keyframe], t0: f64, get: impl Fn(&Keyframe) -> f64) -> String {
+    if kfs.is_empty() {
+        return "0".into();
+    }
+    let at = |k: &Keyframe| fmt_num(t0 + k.t);
+    let mut expr = fmt_num(get(&kfs[kfs.len() - 1]));
+    for i in (0..kfs.len().saturating_sub(1)).rev() {
+        let (a, b) = (&kfs[i], &kfs[i + 1]);
+        let (va, vb) = (get(a), get(b));
+        let seg = if (vb - va).abs() < 1e-9 {
+            fmt_num(va)
+        } else {
+            format!("{}+({})*(t-{})/{}", fmt_num(va), fmt_num(vb - va), at(a), fmt_num((b.t - a.t).max(1e-6)))
+        };
+        expr = format!("if(lt(t,{}),{seg},{expr})", at(b));
+    }
+    format!("if(lt(t,{}),{},{expr})", at(&kfs[0]), fmt_num(get(&kfs[0])))
 }
 
 /// Efek video: shake, punch, flash, bw, vignette, blur, glitch, negate, pixelate, letterbox.

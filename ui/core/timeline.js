@@ -125,6 +125,7 @@
     c.chroma = Object.assign({ enabled: false, color: "#00ff00", similarity: 0.3, blend: 0.1 }, c.chroma || {});
     c.transition = Object.assign({ kind: "none", duration: 0.5 }, c.transition || {});
     c.color = Object.assign({ brightness: 1, contrast: 1, saturation: 1, hue: 0, temperature: 0, lut: "" }, c.color || {});
+    c.keyframes = Array.isArray(c.keyframes) ? c.keyframes.map((k) => Object.assign(defaultTransform(), k)).sort((a, b) => a.t - b.t) : [];
     if (c.kind === "effect") c.effect = Object.assign({ kind: "shake", intensity: 0.5 }, c.effect || {});
     if (c.kind === "text") {
       c.text = c.text || { text: "", style: defaultTextStyle() };
@@ -394,6 +395,11 @@
     right.duration = round(clip.duration - offset);
     right.in = clip.kind === "video" || clip.kind === "audio" ? round(clip.in + offset * speedOf(clip)) : clip.in;
     right.fade_in = 0;
+    if (clip.keyframes && clip.keyframes.length) {
+      const at = Object.assign({ t: 0 }, transformAt(clip, offset));
+      right.keyframes = [Object.assign({}, at)].concat(clip.keyframes.filter((k) => k.t > offset + KF_EPS).map((k) => Object.assign({}, k, { t: round(k.t - offset) })));
+      clip.keyframes = clip.keyframes.filter((k) => k.t < offset - KF_EPS).concat([Object.assign({}, at, { t: offset })]);
+    }
     clip.duration = offset;
     clip.fade_out = 0;
     clip.fade_in = Math.min(clip.fade_in, clip.duration);
@@ -422,6 +428,7 @@
       const t = clamp(time, lo, end - MIN_DURATION);
       const delta = t - clip.start;
       if (timed) clip.in = round(Math.max(0, clip.in + delta * sp));
+      shiftKeyframes(clip, delta);
       clip.start = round(t);
       clip.duration = round(end - t);
     } else {
@@ -477,6 +484,62 @@
       for (const c of track.clips) if (c.start >= clipEnd(clip) - EPS) c.start = round(c.start - clip.duration);
     }
     return clip;
+  }
+
+  const KF_PROPS = ["x", "y", "scale", "rotation", "opacity"];
+  const KF_EPS = 1 / 60;
+
+  /** Transform klip pada waktu lokal `lt` (detik sejak awal klip): interpolasi linear antar keyframe. */
+  function transformAt(clip, lt) {
+    const k = clip.keyframes || [];
+    if (!k.length) return Object.assign({}, clip.transform);
+    if (lt <= k[0].t) return pick(k[0]);
+    if (lt >= k[k.length - 1].t) return pick(k[k.length - 1]);
+    let i = 0;
+    while (i + 1 < k.length && k[i + 1].t <= lt) i++;
+    const a = k[i], b = k[i + 1];
+    const u = (lt - a.t) / Math.max(1e-9, b.t - a.t);
+    const out = {};
+    for (const p of KF_PROPS) out[p] = a[p] + (b[p] - a[p]) * u;
+    return out;
+  }
+
+  function pick(k) { const o = {}; for (const p of KF_PROPS) o[p] = k[p]; return o; }
+
+  /**
+   * Menambah/mengubah keyframe di waktu lokal `lt`. Nilai awal = transform hasil interpolasi di
+   * waktu itu, lalu `patch` diterapkan. Keyframe dalam 1/60 detik dianggap sama.
+   */
+  function setKeyframe(p, clipId, lt, patch = {}) {
+    const { clip } = mustFind(p, clipId);
+    lt = round(clamp(lt, 0, clip.duration));
+    const k = clip.keyframes || (clip.keyframes = []);
+    let kf = k.find((x) => Math.abs(x.t - lt) < KF_EPS);
+    if (!kf) {
+      kf = Object.assign({ t: lt }, transformAt(clip, lt));
+      k.push(kf);
+      k.sort((a, b) => a.t - b.t);
+    }
+    for (const prop of KF_PROPS) if (patch[prop] != null) kf[prop] = +patch[prop];
+    kf.opacity = clamp(kf.opacity, 0, 1);
+    kf.scale = clamp(kf.scale, 0.01, 20);
+    return kf;
+  }
+
+  function removeKeyframe(p, clipId, lt) {
+    const { clip } = mustFind(p, clipId);
+    const i = (clip.keyframes || []).findIndex((x) => Math.abs(x.t - lt) < KF_EPS);
+    if (i < 0) return false;
+    // Keyframe terakhir dihapus: transform tetap di nilai itu agar klip tidak melompat.
+    if (clip.keyframes.length === 1) Object.assign(clip.transform, pick(clip.keyframes[0]));
+    clip.keyframes.splice(i, 1);
+    return true;
+  }
+
+  /** Menggeser keyframe saat awal klip berubah (`delta` = detik konten yang terpangkas). */
+  function shiftKeyframes(clip, delta) {
+    if (!clip.keyframes || !clip.keyframes.length) return;
+    clip.keyframes = clip.keyframes.map((k) => Object.assign({}, k, { t: round(k.t - delta) }));
   }
 
   /** Menukar klip dengan tetangganya di track yang sama (dir -1 = ke kiri, +1 = ke kanan). */
@@ -793,7 +856,7 @@
   }
 
   return {
-    EFFECTS, effectClip, effectTrack,
+    EFFECTS, effectClip, effectTrack, transformAt, setKeyframe, removeKeyframe, KF_PROPS,
     allocate, snapCuts, autoAssemble, beatTimes, syncToBeats, setTransition, transitionActive, previousClip, TRANSITIONS, speedOf, sourceTime, setSpeed,
     MIN_DURATION, STILL_DURATION, RATIOS, RATIO_LABELS, styleScale,
     uid, newProject, normalize, normalizeClip, defaultTextStyle, defaultCaptionStyle, defaultTransform,

@@ -4,6 +4,7 @@
 
 use cutkit_core::ffmpeg::{find_tools, probe, run, run_export, run_job};
 use cutkit_core::*;
+use cutkit_core::model::Keyframe;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -381,4 +382,42 @@ fn every_effect_renders() {
     assert!(bar.iter().all(|&c| c < 30), "letterbox hitam di atas: {bar:?}");
     let plain = pixel(&tools.ffmpeg, &o, n as f64 + 0.5, 80, 45);
     assert!(plain[0] > 200, "efek tidak bocor di luar waktunya: {plain:?}");
+}
+
+#[test]
+fn keyframes_render_motion_and_fade() {
+    let Some(tools) = find_tools(None) else {
+        eprintln!("ffmpeg tidak ditemukan, tes keyframe dilewati");
+        return;
+    };
+    let dir = tmp_dir("keyframe");
+    let s = |p: &PathBuf| p.to_string_lossy().to_string();
+    let sq = dir.join("kotak.png");
+    run(&tools.ffmpeg, &["-hide_banner", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=0xff0000:s=40x40:d=1", "-frames:v", "1", "-update", "1", &s(&sq)].map(String::from)).unwrap();
+    let mut p = Project::new("keyframe");
+    p.canvas = Canvas { width: 320, height: 180, fps: 30.0, background: "#000000".into() };
+    p.assets.push(Asset { id: "k".into(), path: s(&sq), kind: AssetKind::Image, width: 40, height: 40, has_video: true, ..Default::default() });
+    // Kotak 40 px (skala 0.25 dari tinggi kanvas penuh 180 = 45 px) bergerak -100 -> +100 sambil memudar.
+    p.tracks[0].clips.push(Clip {
+        id: "a".into(),
+        kind: ClipKind::Image,
+        asset_id: Some("k".into()),
+        start: 0.0,
+        duration: 2.0,
+        keyframes: vec![
+            Keyframe { t: 0.0, x: -100.0, scale: 0.25, opacity: 1.0, ..Default::default() },
+            Keyframe { t: 2.0, x: 100.0, scale: 0.25, opacity: 0.2, ..Default::default() },
+        ],
+        ..Default::default()
+    });
+    let out = dir.join("keyframe.mp4");
+    let plan = build_plan(&p, &ExportOptions { output: s(&out), quality: Quality::Fast, ..Default::default() }).unwrap();
+    run_export(&tools.ffmpeg, &dir.join("kerja"), &plan, Arc::new(AtomicBool::new(false)), |_| {}).expect("ekspor keyframe");
+    let o = s(&out);
+    let start_left = pixel(&tools.ffmpeg, &o, 0.05, 160 - 98, 90);
+    let start_right = pixel(&tools.ffmpeg, &o, 0.05, 160 + 98, 90);
+    let end_right = pixel(&tools.ffmpeg, &o, 1.95, 160 + 98, 90);
+    assert!(start_left[0] > 200, "awal: kotak di kiri {start_left:?}");
+    assert!(start_right[0] < 40, "awal: kanan kosong {start_right:?}");
+    assert!(end_right[0] > 30 && end_right[0] < 110, "akhir: kotak di kanan dan memudar ke ~20%: {end_right:?}");
 }

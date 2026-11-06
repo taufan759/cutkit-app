@@ -402,3 +402,40 @@ test("trackFor: teks tidak masuk track utama, overlay baru di bawah track Efek",
   assert.ok(p.tracks.indexOf(tr) < fxIndex, "track baru di bawah track Efek");
   assert.equal(T.trackFor(p, T.effectClip("bw"), 0).role, "effects");
 });
+
+test("keyframe: interpolasi linear, tahan di luar rentang, ubah di playhead", () => {
+  const p = T.newProject();
+  p.assets.push({ id: "i", kind: "image", width: 10, height: 10 });
+  const c = T.insertClip(p, "v2", T.clipFromAsset(p.assets[0], { duration: 4 }), 0);
+  assert.deepEqual(T.transformAt(c, 1), c.transform, "tanpa keyframe = transform biasa");
+  T.setKeyframe(p, c.id, 0, { x: -100, scale: 1 });
+  T.setKeyframe(p, c.id, 2, { x: 100, scale: 2, opacity: 0.5 });
+  assert.equal(c.keyframes.length, 2);
+  const mid = T.transformAt(c, 1);
+  assert.deepEqual([mid.x, mid.scale, mid.opacity], [0, 1.5, 0.75]);
+  assert.equal(T.transformAt(c, 3.5).x, 100, "setelah keyframe terakhir ditahan");
+  assert.equal(T.transformAt(c, -1).x, -100);
+  // Mengubah di waktu yang sama memperbarui keyframe yang ada.
+  T.setKeyframe(p, c.id, 2.005, { y: 50 });
+  assert.equal(c.keyframes.length, 2);
+  assert.equal(c.keyframes[1].y, 50);
+  // Keyframe baru di tengah mengambil nilai interpolasi.
+  const k = T.setKeyframe(p, c.id, 1);
+  assert.deepEqual([k.x, k.scale], [0, 1.5]);
+  assert.ok(T.removeKeyframe(p, c.id, 1));
+  assert.equal(c.keyframes.length, 2);
+});
+
+test("keyframe ikut terbagi saat split dan bergeser saat pangkas awal", () => {
+  const p = T.newProject();
+  p.assets.push({ id: "v", kind: "video", duration: 10, width: 10, height: 10 });
+  const c = T.insertClip(p, "v1", T.clipFromAsset(p.assets[0]), 0);
+  T.setKeyframe(p, c.id, 0, { x: 0 });
+  T.setKeyframe(p, c.id, 4, { x: 400 });
+  const r = T.splitClip(p, c.id, 3);
+  assert.deepEqual(c.keyframes.map((k) => [k.t, k.x]), [[0, 0], [3, 300]]);
+  assert.deepEqual(r.keyframes.map((k) => [k.t, k.x]), [[0, 300], [1, 400]]);
+  T.trimClip(p, r.id, "start", 3.5);
+  assert.deepEqual(r.keyframes.map((k) => [k.t, k.x]), [[-0.5, 300], [0.5, 400]]);
+  assert.equal(T.transformAt(r, 0).x, 350, "animasi tetap menempel pada konten");
+});

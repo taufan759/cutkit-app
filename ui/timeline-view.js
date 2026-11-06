@@ -218,6 +218,10 @@
           node.append(el("div", { class: "beat" + (down.has(b) ? " down" : ""), style: `left:${this.timeToX((b - clip.in) / sp)}px` }));
         }
       }
+      for (const k of clip.keyframes || []) {
+        if (k.t < -1e-6 || k.t > clip.duration + 1e-6) continue;
+        node.append(el("div", { class: "kf", title: `Keyframe ${k.t.toFixed(2)} s`, style: `left:${this.timeToX(k.t)}px` }));
+      }
       if (TL.transitionActive(clip)) {
         node.append(el("div", { class: "trans", title: `Transisi ${clip.transition.kind} ${clip.transition.duration} s`, style: `width:${Math.max(8, this.timeToX(clip.transition.duration))}px` }, "⧓"));
       }

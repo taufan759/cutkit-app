@@ -552,7 +552,8 @@
           if (clip.kind === "text") { textJobs.push({ clip, ti }); continue; }
           const asset = TL.getAsset(p, clip.asset_id);
           if (!asset) continue;
-          const pl = GEO.place(p.canvas.width, p.canvas.height, asset.width, asset.height, clip.fit, clip.transform);
+          const tf = TL.transformAt(clip, t - clip.start);
+          const pl = GEO.place(p.canvas.width, p.canvas.height, asset.width, asset.height, clip.fit, tf);
           boxes.push({ id: clip.id, pl, kind: clip.kind });
           let source = null;
           if (asset.missing) source = null;
@@ -585,7 +586,7 @@
           if (source) ({ source, colored } = this._processed(clip, source, pl, k));
           ctx.save();
           if (!colored) { const cf = colorFilter(clip); if (cf) ctx.filter = cf; }
-          ctx.globalAlpha = Math.max(0, Math.min(1, clip.transform.opacity)) * tr.alpha;
+          ctx.globalAlpha = Math.max(0, Math.min(1, tf.opacity)) * tr.alpha;
           ctx.translate(pl.cx + tr.dx, pl.cy + tr.dy);
           ctx.rotate(pl.rad);
           if (source && GEO.motionActive(clip.motion)) {

@@ -11,7 +11,7 @@
 
 use crate::ass;
 use crate::layout::{place, Placement};
-use crate::model::{AssetKind, ClipKind, Motion, Project, TrackKind, Transition};
+use crate::model::{keyframe_expr, AssetKind, ClipKind, Keyframe, Motion, Project, TrackKind, Transition};
 use serde::{Deserialize, Serialize};
 
 pub const FILTER_FILE: &str = "cutkit-filter.txt";
@@ -107,6 +107,86 @@ struct Visual {
     t_out: Option<(String, f64, f64)>,
     /// Filter warna (diawali koma) dan LUT yang perlu disalin.
     color: String,
+    /// Animasi keyframe (minimal dua keyframe).
+    kf: Option<KfAnim>,
+}
+
+/// Animasi transform per frame dari keyframe.
+struct KfAnim {
+    /// Rantai sesudah setpts: scale per frame, pad ke ukuran tetap, rotate, opacity.
+    chain: String,
+    /// Ekspresi posisi overlay (kiri-atas) sebelum offset transisi.
+    x: String,
+    y: String,
+}
+
+/// Menyusun animasi keyframe: ukuran dasar (skala 1) `bw`x`bh`, kanvas `w`x`h`, `t0` = waktu klip lokal 0.
+fn keyframe_anim(kfs: &[Keyframe], bw: u32, bh: u32, w: u32, h: u32, t0: f64, tag: usize, fps: f64) -> KfAnim {
+    let smax = kfs.iter().map(|k| k.scale.clamp(0.01, 20.0)).fold(0.0, f64::max);
+    let rotates = kfs.iter().any(|k| k.rotation.abs() > 1e-6);
+    let (mw, mh) = if rotates {
+        let d = ((bw as f64).hypot(bh as f64) * smax).ceil() as u32 + 2;
+        (d + d % 2, d + d % 2)
+    } else {
+        let a = (bw as f64 * smax).ceil() as u32 + 2;
+        let b = (bh as f64 * smax).ceil() as u32 + 2;
+        (a + a % 2, b + b % 2)
+    };
+    let s = keyframe_expr(kfs, t0, |k| k.scale.clamp(0.01, 20.0));
+    let mut chain = format!(
+        ",scale=w='max(2,2*trunc({bw}*({s})/2))':h='max(2,2*trunc({bh}*({s})/2))':eval=frame,pad=w={mw}:h={mh}:x='(ow-iw)/2':y='(oh-ih)/2':color=0x00000000:eval=frame"
+    );
+    if rotates {
+        let r = keyframe_expr(kfs, t0, |k| k.rotation.to_radians());
+        chain.push_str(&format!(",rotate=a='{r}':ow={mw}:oh={mh}:c=0x00000000"));
+    }
+    let ops: Vec<f64> = kfs.iter().map(|k| k.opacity.clamp(0.0, 1.0)).collect();
+    if ops.iter().any(|o| (o - ops[0]).abs() > 1e-6) {
+        // Opacity tidak bisa berupa ekspresi di colorchannelmixer: perintah per frame lewat sendcmd.
+        let name = format!("colorchannelmixer@kf{tag}");
+        let (first, last) = (kfs[0].t, kfs[kfs.len() - 1].t);
+        let step = 1.0 / fps.max(1.0);
+        let mut cmds = vec![];
+        let mut lt = first;
+        let mut prev = f64::NAN;
+        while lt <= last + step / 2.0 {
+            let v = keyframe_value(kfs, lt, |k| k.opacity.clamp(0.0, 1.0));
+            if (v - prev).abs() > 0.002 || prev.is_nan() {
+                cmds.push(format!("{} {name} aa {}", fmt_t(t0 + lt), fmt_t(v)));
+                prev = v;
+            }
+            lt += step;
+        }
+        chain.push_str(&format!(",sendcmd=c='{}',{name}=aa={}", cmds.join(";"), fmt_t(ops[0])));
+    } else if ops[0] < 0.999 {
+        chain.push_str(&format!(",colorchannelmixer=aa={}", fmt_t(ops[0])));
+    }
+    let x = format!("{}+({})", w as f64 / 2.0 - mw as f64 / 2.0, keyframe_expr(kfs, t0, |k| k.x));
+    let y = format!("{}+({})", h as f64 / 2.0 - mh as f64 / 2.0, keyframe_expr(kfs, t0, |k| k.y));
+    KfAnim { chain, x, y }
+}
+
+fn fmt_t(v: f64) -> String {
+    let s = format!("{:.4}", v);
+    let s = s.trim_end_matches('0').trim_end_matches('.').to_string();
+    if s.is_empty() || s == "-0" { "0".into() } else { s }
+}
+
+/// Nilai keyframe pada waktu lokal `lt` (sama dengan transformAt di ui/core/timeline.js).
+pub fn keyframe_value(kfs: &[Keyframe], lt: f64, get: impl Fn(&Keyframe) -> f64) -> f64 {
+    if kfs.is_empty() {
+        return 0.0;
+    }
+    if lt <= kfs[0].t {
+        return get(&kfs[0]);
+    }
+    for w in kfs.windows(2) {
+        if lt < w[1].t {
+            let u = (lt - w[0].t) / (w[1].t - w[0].t).max(1e-9);
+            return get(&w[0]) + (get(&w[1]) - get(&w[0])) * u;
+        }
+    }
+    get(&kfs[kfs.len() - 1])
 }
 
 /// Ekspresi easing halus (smoothstep) dari kemajuan transisi di waktu `t`.
@@ -114,17 +194,18 @@ fn ease_expr(start: f64, dur: f64) -> String {
     format!("st(0,clip((t-{})/{},0,1));ld(0)*ld(0)*(3-2*ld(0))", f(start), f(dur.max(0.001)))
 }
 
-/// Ekspresi posisi overlay x dan y untuk transisi masuk/keluar (geser/dorong).
-fn overlay_xy(p: &Placement, w: u32, h: u32, t_in: &Option<(String, f64, f64)>, t_out: &Option<(String, f64, f64)>) -> (String, String) {
-    let mut x = format!("{}", p.x);
-    let mut y = format!("{}", p.y);
+/// Ekspresi posisi overlay x dan y untuk transisi masuk/keluar (geser/dorong), dari posisi dasar.
+fn overlay_xy(base: (String, String), w: u32, h: u32, t_in: &Option<(String, f64, f64)>, t_out: &Option<(String, f64, f64)>) -> (String, String) {
+    let (mut x, mut y) = base;
+    let p = Placement { x: 0, y: 0, w: 0, h: 0, ow: 0, oh: 0, radians: 0.0 };
+    let _ = p;
     if let Some((kind, d, s)) = t_in {
         let e = ease_expr(*s, *d);
         match kind.as_str() {
-            "slide-left" | "push-left" => x = format!("{}+{w}*(1-({e}))", p.x),
-            "slide-right" | "push-right" => x = format!("{}-{w}*(1-({e}))", p.x),
-            "slide-up" => y = format!("{}+{h}*(1-({e}))", p.y),
-            "slide-down" => y = format!("{}-{h}*(1-({e}))", p.y),
+            "slide-left" | "push-left" => x = format!("{x}+{w}*(1-({e}))"),
+            "slide-right" | "push-right" => x = format!("{x}-{w}*(1-({e}))"),
+            "slide-up" => y = format!("{y}+{h}*(1-({e}))"),
+            "slide-down" => y = format!("{y}-{h}*(1-({e}))"),
             _ => {}
         }
     }
@@ -274,7 +355,15 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String, Ve
                 args.extend(strings(&["-i", &asset.path]));
             }
             if want_video {
-                let pl = place(w, h, asset.width, asset.height, clip.fit, &clip.transform);
+                // Satu keyframe = transform tetap; dua atau lebih = animasi.
+                let static_t = if clip.keyframes.len() == 1 { clip.keyframes[0].transform() } else { clip.transform };
+                let animated = clip.keyframes.len() >= 2;
+                let pl = if animated {
+                    place(w, h, asset.width, asset.height, clip.fit, &crate::model::Transform { x: 0.0, y: 0.0, scale: 1.0, rotation: 0.0, opacity: 1.0 })
+                } else {
+                    place(w, h, asset.width, asset.height, clip.fit, &static_t)
+                };
+                let kf = animated.then(|| keyframe_anim(&clip.keyframes, pl.w, pl.h, w, h, clip.start - clip.offset, visuals.len(), fps));
                 let speed = clip.effective_speed();
                 let span = if clip.span > 0.0 { clip.span } else { clip.duration };
                 let motion = clip.motion.is_active().then(|| {
@@ -300,7 +389,8 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String, Ve
                     }
                 });
                 let color = clip.color.filters(lut_name.as_deref());
-                visuals.push(Visual { input, blur_bg: clip.background == "blur", colorkey, speed, motion, start: clip.start, end: clip.end(), place: pl, opacity: clip.transform.opacity.clamp(0.0, 1.0), t_in, t_out, color });
+                let opacity = if animated { 1.0 } else { static_t.opacity.clamp(0.0, 1.0) };
+                visuals.push(Visual { input, blur_bg: clip.background == "blur", colorkey, speed, motion, start: clip.start, end: clip.end(), place: pl, opacity, t_in, t_out, color, kf });
             }
             if want_audio {
                 // Selama transisi suara ikut crossfade: klip baru masuk pelan, klip lama keluar pelan.
@@ -391,13 +481,17 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String, Ve
             };
             // Warna setelah skala (lebih ringan untuk sumber besar), sebelum rotasi.
             chain.push_str(&v.color);
-            if p.radians.abs() > 1e-9 {
+            if v.kf.is_none() && p.radians.abs() > 1e-9 {
                 chain.push_str(&format!(",rotate={}:ow={}:oh={}:c=0x00000000", f(p.radians), p.ow, p.oh));
             }
             if v.opacity < 0.999 {
                 chain.push_str(&format!(",colorchannelmixer=aa={}", f(v.opacity)));
             }
             chain.push_str(&format!(",{pts}"));
+            // Animasi keyframe memakai waktu timeline, jadi diterapkan sesudah setpts.
+            if let Some(kf) = &v.kf {
+                chain.push_str(&kf.chain);
+            }
             if let Some((k, d, s)) = &v.t_in {
                 if k == "fade" {
                     chain.push_str(&format!(",fade=t=in:st={}:d={}:alpha=1", f(*s), f(*d)));
@@ -405,7 +499,11 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String, Ve
             }
             chain.push_str(&format!("[v{i}]"));
             g.push(chain);
-            let (ox, oy) = overlay_xy(p, w, h, &v.t_in, &v.t_out);
+            let base_xy = match &v.kf {
+                Some(kf) => (kf.x.clone(), kf.y.clone()),
+                None => (p.x.to_string(), p.y.to_string()),
+            };
+            let (ox, oy) = overlay_xy(base_xy, w, h, &v.t_in, &v.t_out);
             let quote = |e: String| if e.contains('(') { format!("'{e}'") } else { e };
             g.push(format!(
                 "{base}[v{i}]overlay=x={}:y={}:format=rgb:eof_action=pass:enable='between(t,{},{})'[b{}]",
@@ -981,6 +1079,36 @@ mod tests {
             assert!(lines.last().unwrap().ends_with("[out]"), "{k}: {lines:?}");
             assert!(lines.iter().any(|l| l.contains("between(t,1,2)")), "{k} harus terbatas waktu");
         }
+    }
+
+    #[test]
+    fn keyframes_animate_scale_rotation_position_and_opacity() {
+        let mut p = project();
+        let c = &mut p.tracks[1].clips[0]; // gambar 500x400, mulai 1, durasi 2
+        c.keyframes = vec![
+            Keyframe { t: 0.0, x: 0.0, y: 0.0, scale: 0.5, rotation: 0.0, opacity: 1.0 },
+            Keyframe { t: 1.0, x: 200.0, y: -100.0, scale: 1.0, rotation: 90.0, opacity: 0.5 },
+        ];
+        let g = build_plan(&p, &opts()).unwrap().filter_script;
+        // Ukuran dasar skala 1 = 1080x864 (pas di kanvas); kotak tetap = diagonal x skala maks.
+        assert!(g.contains("[3:v]format=rgba,scale=1080:864,setpts=PTS-STARTPTS+1/TB,scale=w='max(2,2*trunc(1080*(if(lt(t,1),0.5,if(lt(t,2),0.5+(0.5)*(t-1)/1,1)))/2))'"), "{g}");
+        assert!(g.contains(":eval=frame,pad=w=1386:h=1386:x='(ow-iw)/2':y='(oh-ih)/2':color=0x00000000:eval=frame,rotate=a='if(lt(t,1),0,if(lt(t,2),0+(1.5708)*(t-1)/1,1.5708))':ow=1386:oh=1386"), "{g}");
+        assert!(g.contains("sendcmd=c='1 colorchannelmixer@kf1 aa 1;"), "{g}");
+        assert!(g.contains("2 colorchannelmixer@kf1 aa 0.5',colorchannelmixer@kf1=aa=1[v1]"), "{g}");
+        assert!(g.contains("overlay=x='-153+(if(lt(t,1),0,if(lt(t,2),0+(200)*(t-1)/1,200)))':y='267+(if(lt(t,1),0,if(lt(t,2),0+(-100)*(t-1)/1,-100)))'"), "{g}");
+        assert!(!g.contains("rotate=0.2618"), "transform statis diabaikan saat ada animasi");
+        // Satu keyframe = transform tetap dari keyframe itu.
+        p.tracks[1].clips[0].keyframes.truncate(1);
+        let g = build_plan(&p, &opts()).unwrap().filter_script;
+        assert!(g.contains("[3:v]format=rgba,scale=540:432,setpts"), "{g}");
+    }
+
+    #[test]
+    fn keyframe_value_matches_js_rules() {
+        let k = [Keyframe { t: 0.0, x: -100.0, ..Default::default() }, Keyframe { t: 2.0, x: 100.0, ..Default::default() }];
+        assert_eq!(keyframe_value(&k, 1.0, |k| k.x), 0.0);
+        assert_eq!(keyframe_value(&k, -1.0, |k| k.x), -100.0);
+        assert_eq!(keyframe_value(&k, 5.0, |k| k.x), 100.0);
     }
 
     #[test]

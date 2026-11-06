@@ -1475,16 +1475,42 @@ function renderInspector() {
   }
 
   if (c.kind !== "audio") {
-    const t = c.transform;
+    const hasKf = (c.kind === "image" || c.kind === "video") && c.keyframes.length > 0;
+    const lt = preview.time - c.start;
+    const t = hasKf ? TL.transformAt(c, lt) : c.transform;
+    // Dengan keyframe, slider mengubah keyframe di playhead.
+    const updT = (patch) => {
+      const live = TL.findClip(state.project, c.id);
+      if (!live) return;
+      if (hasKf) TL.setKeyframe(state.project, c.id, preview.time - c.start, patch);
+      else TL.updateClip(state.project, c.id, { transform: patch });
+    };
+    const inClip = lt >= -1e-6 && lt <= c.duration + 1e-6;
+    const kfHere = c.keyframes.find((k) => Math.abs(k.t - lt) < 1 / 60);
+    if (c.kind === "image" || c.kind === "video") sections.push(el("section", {},
+      el("h4", {}, "Keyframe"),
+      el("div", { class: "btn-row" },
+        el("button", {
+          class: "btn small" + (kfHere ? " primary" : ""),
+          disabled: !inClip,
+          title: inClip ? "" : "Pindahkan playhead ke dalam klip",
+          onclick: () => commit((pp) => (kfHere ? TL.removeKeyframe(pp, c.id, lt) : TL.setKeyframe(pp, c.id, lt))),
+        }, kfHere ? "◆ Hapus keyframe di sini" : "◇ Tambah keyframe di playhead"),
+        hasKf ? el("button", { class: "btn small ghost", onclick: () => commit((pp) => { const cl = TL.findClip(pp, c.id).clip; Object.assign(cl.transform, TL.transformAt(cl, lt)); cl.keyframes = []; }) }, "Hapus semua") : null),
+      hasKf ? el("div", { class: "kf-list" }, c.keyframes.map((k) => el("button", {
+        class: "btn small" + (Math.abs(k.t - lt) < 1 / 60 ? " primary" : ""),
+        onclick: () => { preview.seek(c.start + Math.max(0, k.t)); renderInspector(); },
+      }, `◆ ${k.t.toFixed(2)}s`))) : null,
+      el("p", { class: "hint" }, hasKf ? "Ubah posisi, skala, rotasi, atau opacity di playhead untuk mengatur keyframe di situ. Di antara keyframe nilainya berubah halus." : "Tambahkan dua keyframe atau lebih di waktu berbeda, lalu ubah posisi/skala/rotasi/opacity untuk membuat animasi.")));
     sections.push(el("section", {},
-      el("h4", {}, "Posisi & ukuran"),
+      el("h4", {}, hasKf ? "Posisi & ukuran (keyframe di playhead)" : "Posisi & ukuran"),
       c.kind !== "text" ? field("Isi kanvas", segmented([["contain", "Pas"], ["cover", "Penuh"]], c.fit, (v) => commit((pp) => TL.updateClip(pp, c.id, { fit: v })))) : null,
       c.kind !== "text" ? field("Latar", segmented([["none", "Warna kanvas"], ["blur", "Blur"]], c.background, (v) => commit((pp) => TL.updateClip(pp, c.id, { background: v })))) : null,
-      slider("X", t.x, { min: -p.canvas.width, max: p.canvas.width, apply: (v) => upd({ transform: { x: v } }) }),
-      slider("Y", t.y, { min: -p.canvas.height, max: p.canvas.height, apply: (v) => upd({ transform: { y: v } }) }),
-      slider("Skala", t.scale, { min: 5, max: 400, unit: "%", fromModel: (v) => v * 100, toModel: (v) => v / 100, apply: (v) => upd({ transform: { scale: v } }) }),
-      slider("Rotasi", t.rotation, { min: -180, max: 180, unit: "°", apply: (v) => upd({ transform: { rotation: v } }) }),
-      slider("Opacity", t.opacity, { min: 0, max: 100, unit: "%", fromModel: (v) => v * 100, toModel: (v) => v / 100, apply: (v) => upd({ transform: { opacity: v } }) }),
+      slider("X", t.x, { min: -p.canvas.width, max: p.canvas.width, apply: (v) => updT({ x: v }) }),
+      slider("Y", t.y, { min: -p.canvas.height, max: p.canvas.height, apply: (v) => updT({ y: v }) }),
+      slider("Skala", t.scale, { min: 5, max: 400, unit: "%", fromModel: (v) => v * 100, toModel: (v) => v / 100, apply: (v) => updT({ scale: v }) }),
+      slider("Rotasi", t.rotation, { min: -180, max: 180, unit: "°", apply: (v) => updT({ rotation: v }) }),
+      slider("Opacity", t.opacity, { min: 0, max: 100, unit: "%", fromModel: (v) => v * 100, toModel: (v) => v / 100, apply: (v) => updT({ opacity: v }) }),
       el("div", { class: "btn-row" },
         el("button", { class: "btn small", onclick: () => commit((pp) => TL.updateClip(pp, c.id, { transform: { x: 0, y: 0 } })) }, "Ke tengah"),
         el("button", { class: "btn small", onclick: () => commit((pp) => TL.updateClip(pp, c.id, { transform: TL.defaultTransform() })) }, "Reset"))));
@@ -1624,6 +1650,12 @@ function projectInspector() {
       el("p", { class: "hint" }, "Pilih klip di timeline atau preview untuk mengatur posisi, skala, rotasi, volume, dan fade. Spasi = putar, S = potong, Delete = hapus, Ctrl+Z = urungkan.")));
 }
 
+/** Mengubah transform klip; bila klip punya keyframe, yang diubah keyframe di playhead (seperti CapCut). */
+function applyTransform(p, clip, patch) {
+  if (clip.keyframes && clip.keyframes.length) TL.setKeyframe(p, clip.id, preview.time - clip.start, patch);
+  else Object.assign(clip.transform, patch);
+}
+
 /* ---------- interaksi preview ---------- */
 
 let pdrag = null;
@@ -1653,7 +1685,7 @@ function previewPointerDown(e) {
   const clip = box.kind === "captions" ? null : TL.findClip(p, box.id).clip;
   pdrag = {
     mode, box, x0: x, y0: y,
-    orig: clip ? { ...clip.transform } : { x: p.captions.style.x || 0, y: p.captions.style.y },
+    orig: clip ? { ...TL.transformAt(clip, preview.time - clip.start) } : { x: p.captions.style.x || 0, y: p.captions.style.y },
     dist0: Math.hypot(x - box.pl.cx, y - box.pl.cy) || 1,
     snapshot: snapshot(),
   };
@@ -1679,7 +1711,6 @@ function previewPointerMove(e) {
     preview.showGuides = st.x === 0;
   } else {
     const clip = TL.findClip(p, d.box.id).clip;
-    const t = clip.transform;
     if (d.mode === "move") {
       let nx = d.orig.x + (x - d.x0);
       let ny = d.orig.y + (y - d.y0);
@@ -1687,18 +1718,17 @@ function previewPointerMove(e) {
       const snapY = Math.abs(ny) < 10 * px;
       if (snapX && !e.altKey) nx = 0;
       if (snapY && !e.altKey) ny = 0;
-      t.x = Math.round(nx);
-      t.y = Math.round(ny);
+      applyTransform(p, clip, { x: Math.round(nx), y: Math.round(ny) });
       preview.showGuides = (snapX || snapY) && !e.altKey;
     } else if (d.mode === "scale") {
       const dist = Math.hypot(x - d.box.pl.cx, y - d.box.pl.cy);
-      t.scale = clamp(+(d.orig.scale * (dist / d.dist0)).toFixed(4), 0.02, 20);
+      applyTransform(p, clip, { scale: clamp(+(d.orig.scale * (dist / d.dist0)).toFixed(4), 0.02, 20) });
     } else {
       let deg = (Math.atan2(y - d.box.pl.cy, x - d.box.pl.cx) * 180) / Math.PI + 90;
       if (deg > 180) deg -= 360;
       if (e.shiftKey) deg = Math.round(deg / 15) * 15;
       else for (const s of [-180, -90, 0, 90, 180]) if (Math.abs(deg - s) < 3) deg = s;
-      t.rotation = Math.round(deg * 10) / 10;
+      applyTransform(p, clip, { rotation: Math.round(deg * 10) / 10 });
     }
   }
   preview.invalidate();
@@ -1726,9 +1756,9 @@ function previewWheel(e) {
   if (!box || !GEO.hitTest(box.pl, x, y)) return;
   e.preventDefault();
   beginEdit();
-  const t = f.clip.transform;
-  if (e.shiftKey) t.rotation = Math.round((t.rotation + (e.deltaY < 0 ? 2 : -2)) * 10) / 10;
-  else t.scale = clamp(+(t.scale * (e.deltaY < 0 ? 1.05 : 1 / 1.05)).toFixed(4), 0.02, 20);
+  const t = TL.transformAt(f.clip, preview.time - f.clip.start);
+  if (e.shiftKey) applyTransform(state.project, f.clip, { rotation: Math.round((t.rotation + (e.deltaY < 0 ? 2 : -2)) * 10) / 10 });
+  else applyTransform(state.project, f.clip, { scale: clamp(+(t.scale * (e.deltaY < 0 ? 1.05 : 1 / 1.05)).toFixed(4), 0.02, 20) });
   live();
   clearTimeout(wheelTimer);
   wheelTimer = setTimeout(() => { endEdit(); renderInspector(); }, 400);
@@ -2169,6 +2199,11 @@ const preview = new window.CK.Preview($("#preview"), {
   selected: () => state.selected,
   onTime: (t) => {
     $("#tc-now").textContent = fmtTime(t, state.project.canvas.fps);
+    const sel = selectedClip();
+    if (sel && sel.clip.keyframes && sel.clip.keyframes.length && !preview.playing && !state.editSnapshot) {
+      clearTimeout(state.kfInspTimer);
+      state.kfInspTimer = setTimeout(renderInspector, 120);
+    }
     tlView.updatePlayhead();
     if (preview.playing) tlView.follow();
     $("#play-btn").textContent = preview.playing ? "❚❚" : "▶";
