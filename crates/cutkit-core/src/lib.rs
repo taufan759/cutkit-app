@@ -2,9 +2,12 @@
 //! Tidak bergantung pada Tauri sehingga semua logika bisa diuji dengan `cargo test`.
 
 pub mod ass;
+pub mod export;
+pub mod layout;
 pub mod model;
 pub mod probe;
 pub mod proxy;
 
+pub use export::{build_plan, Encoder, ExportOptions, ExportPlan, Quality};
 pub use model::*;
 pub use probe::MediaInfo;
