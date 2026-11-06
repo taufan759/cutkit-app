@@ -64,7 +64,7 @@ test("teks manual dibagi ke rentang waktu", () => {
 test("frameAt memberi halaman dan kata aktif", () => {
   const words = [{ text: "satu", start: 0, end: 0.5 }, { text: "dua", start: 0.5, end: 1 }, { text: "tiga", start: 1, end: 1.5 }];
   const style = { words_per_page: 2, max_line_chars: 20, uppercase: true };
-  assert.deepEqual(C.frameAt(words, style, 0.7), { lines: [[{ text: "SATU", active: false }, { text: "DUA", active: true }]] });
+  assert.deepEqual(C.frameAt(words, style, 0.7).lines, [[{ text: "SATU", active: false }, { text: "DUA", active: true }]]);
   assert.deepEqual(C.frameAt(words, style, 1.2).lines[0][0], { text: "TIGA", active: true });
   assert.equal(C.frameAt(words, style, 3), null);
 });
@@ -75,4 +75,14 @@ test("ekspor SRT dan JSON kata bisa diimpor ulang", () => {
   assert.equal(srt, "1\n00:00:00,000 --> 00:00:01,250\nsatu dua\n\n2\n00:00:03,000 --> 00:00:03,500\ntiga\n");
   assert.equal(C.parseSrt(srt).length, 2);
   assert.deepEqual(C.parseWordsJson(C.toWordsJson(words)), words);
+});
+
+test("animasi pop: kata aktif mulai 1,25x lalu kembali ke ukuran sorotan dalam 120 ms", () => {
+  const st = { highlight_scale: 1.15, animation: "pop" };
+  assert.equal(C.activeScale(st, 0), 1.44);
+  assert.ok(Math.abs(C.activeScale(st, 0.06) - 1.295) < 1e-9);
+  assert.equal(C.activeScale(st, 0.5), 1.15);
+  assert.equal(C.activeScale({ highlight_scale: 1.15, animation: "none" }, 0), 1.15);
+  const words = [{ text: "a", start: 0, end: 0.5 }, { text: "b", start: 0.5, end: 1 }];
+  assert.ok(Math.abs(C.frameAt(words, { words_per_page: 2, max_line_chars: 9 }, 0.55).since - 0.05) < 1e-9);
 });

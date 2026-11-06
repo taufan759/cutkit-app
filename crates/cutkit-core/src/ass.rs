@@ -3,7 +3,7 @@
 //! Logika pembagian halaman/baris harus sama dengan `ui/captions.js` agar
 //! preview dan hasil ekspor cocok.
 
-use crate::model::{CaptionStyle, Clip, ClipKind, Project, TextStyle, Word};
+use crate::model::{CaptionStyle, Clip, ClipKind, Project, TextStyle, Word, POP_FACTOR, POP_MS};
 
 /// Jeda antar kata lebih dari ini memulai halaman caption baru.
 pub const PAGE_GAP: f64 = 1.5;
@@ -198,6 +198,8 @@ pub fn build_ass(project: &Project) -> Option<String> {
             let cx = w as f64 / 2.0 + st.x;
             let cy = h as f64 * st.y;
             let scale = (st.highlight_scale * 100.0).round() as i64;
+            let pop_from = (st.highlight_scale * POP_FACTOR * 100.0).round() as i64;
+            let pop = st.animation == "pop";
             let hl = ass_inline_color(&st.highlight_color);
             for cue in cues(&words, &pages) {
                 let page = &pages[cue.page];
@@ -211,7 +213,9 @@ pub fn build_ass(project: &Project) -> Option<String> {
                                 if st.uppercase {
                                     t = t.to_uppercase();
                                 }
-                                if i == cue.active {
+                                if i == cue.active && pop {
+                                    format!("{{\\c{hl}\\fscx{pop_from}\\fscy{pop_from}\\t(0,{POP_MS},\\fscx{scale}\\fscy{scale})}}{t}{{\\r}}")
+                                } else if i == cue.active {
                                     format!("{{\\c{hl}\\fscx{scale}\\fscy{scale}}}{t}{{\\r}}")
                                 } else {
                                     t
@@ -347,6 +351,10 @@ mod tests {
         assert!(ass.contains("Dialogue: 0,0:00:00.50,0:00:01.00,Cap,,0,0,0,,{\\an5\\pos(540,1382.4)}HALO {\\c&H00E6FF&\\fscx115\\fscy115}DUNIA{\\r}"));
         assert!(ass.contains("Style: T1,Impact,72,&H00FFFFFF,&H000000FF,&H00000000,&H7F000000,0,0,0,0,100,100,0,0,3,4,0,5,0,0,0,1"));
         assert!(ass.contains("Dialogue: 2,0:00:01.00,0:00:03.00,T1,,0,0,0,,{\\an5\\pos(540,460)\\frz-10\\fscx150\\fscy150\\bord6\\shad0\\1a&H7F&\\3a&H7F&\\4a&HBF&}Judul (x)"));
+
+        p.captions.style.animation = "pop".into();
+        let popped = build_ass(&p).unwrap();
+        assert!(popped.contains("{\\c&H00E6FF&\\fscx144\\fscy144\\t(0,120,\\fscx115\\fscy115)}HALO{\\r} DUNIA"), "{popped}");
 
         p.captions.enabled = false;
         p.tracks[1].clips.clear();

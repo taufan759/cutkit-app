@@ -795,10 +795,10 @@ function renderTextPresets() {
 /* ---------- caption ---------- */
 
 const CAPTION_PRESETS = [
-  { name: "Kuning klasik", style: { font: "Impact", color: "#ffffff", highlight_color: "#ffe600", outline_color: "#000000", outline: 5, shadow: 2, background: "", uppercase: true, highlight_scale: 1.15 } },
-  { name: "Hijau", style: { font: "Arial Black", color: "#ffffff", highlight_color: "#38ff6a", outline_color: "#000000", outline: 6, shadow: 0, background: "", uppercase: true, highlight_scale: 1.1 } },
-  { name: "Kotak", style: { font: "Segoe UI", bold: true, color: "#ffffff", highlight_color: "#35c9ff", outline_color: "#000000", outline: 12, shadow: 0, background: "#000000b0", uppercase: false, highlight_scale: 1 } },
-  { name: "Putih", style: { font: "Bahnschrift", color: "#dddddd", highlight_color: "#ffffff", outline_color: "#000000", outline: 3, shadow: 3, background: "", uppercase: false, highlight_scale: 1.08 } },
+  { name: "Kuning klasik", style: { font: "Impact", color: "#ffffff", highlight_color: "#ffe600", outline_color: "#000000", outline: 5, shadow: 2, background: "", uppercase: true, highlight_scale: 1.15, animation: "pop" } },
+  { name: "Hijau", style: { font: "Arial Black", color: "#ffffff", highlight_color: "#38ff6a", outline_color: "#000000", outline: 6, shadow: 0, background: "", uppercase: true, highlight_scale: 1.1, animation: "pop" } },
+  { name: "Kotak", style: { font: "Segoe UI", bold: true, color: "#ffffff", highlight_color: "#35c9ff", outline_color: "#000000", outline: 12, shadow: 0, background: "#000000b0", uppercase: false, highlight_scale: 1, animation: "none" } },
+  { name: "Putih", style: { font: "Bahnschrift", color: "#dddddd", highlight_color: "#ffffff", outline_color: "#000000", outline: 3, shadow: 3, background: "", uppercase: false, highlight_scale: 1.08, animation: "pop" } },
 ];
 
 function setCaptions(fn, opts = {}) {
@@ -980,7 +980,8 @@ function styleControls(st, apply, opts = {}) {
       slider("Kata/halaman", st.words_per_page, { min: 1, max: 10, apply: (v) => apply({ words_per_page: Math.round(v) }) }),
       slider("Huruf/baris", st.max_line_chars, { min: 4, max: 40, apply: (v) => apply({ max_line_chars: Math.round(v) }) }),
       slider("Posisi tinggi", st.y, { min: 5, max: 95, unit: "%", fromModel: (v) => v * 100, toModel: (v) => v / 100, apply: (v) => apply({ y: v }) }),
-      slider("Sorot besar", st.highlight_scale, { min: 100, max: 160, unit: "%", fromModel: (v) => v * 100, toModel: (v) => v / 100, apply: (v) => apply({ highlight_scale: v }) }));
+      slider("Sorot besar", st.highlight_scale, { min: 100, max: 160, unit: "%", fromModel: (v) => v * 100, toModel: (v) => v / 100, apply: (v) => apply({ highlight_scale: v }) }),
+      field("Animasi kata", segmented([["none", "Tanpa"], ["pop", "Pop"]], st.animation || "none", (v) => { beginEdit(); apply({ animation: v }); live(); endEdit(); })));
   }
   return el("div", { class: "insp-style", style: "display:flex;flex-direction:column;gap:8px" }, nodes);
 }

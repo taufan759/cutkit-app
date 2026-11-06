@@ -445,7 +445,7 @@
         if (frame) {
           ctx.save();
           ctx.translate(cx, cy);
-          const size = drawTextBlock(ctx, frame.lines, st, { highlightColor: st.highlight_color, highlightScale: st.highlight_scale });
+          const size = drawTextBlock(ctx, frame.lines, st, { highlightColor: st.highlight_color, highlightScale: CAP.activeScale(st, frame.since) });
           ctx.restore();
           boxes.push({ id: "__captions", pl: { cx, cy, w: size.w, h: size.h, rad: 0 }, kind: "captions" });
         } else if (this.host.selected() === "__captions") {

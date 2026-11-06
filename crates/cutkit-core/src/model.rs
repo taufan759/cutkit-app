@@ -336,7 +336,13 @@ pub struct CaptionStyle {
     /// Geser horizontal dari tengah, piksel kanvas.
     pub x: f64,
     pub highlight_scale: f64,
+    /// Animasi kata aktif: "none" atau "pop" (membesar lalu kembali dalam POP_MS).
+    pub animation: String,
 }
+
+/// Animasi pop: kata aktif mulai dari POP_FACTOR x ukuran sorotan, kembali dalam POP_MS milidetik.
+pub const POP_FACTOR: f64 = 1.25;
+pub const POP_MS: u32 = 120;
 
 impl Default for CaptionStyle {
     fn default() -> Self {
@@ -356,6 +362,7 @@ impl Default for CaptionStyle {
             y: 0.72,
             x: 0.0,
             highlight_scale: 1.15,
+            animation: "none".into(),
         }
     }
 }

@@ -38,7 +38,7 @@
     return {
       font: "Impact", size: 80, color: "#ffffff", highlight_color: "#ffe600", outline_color: "#000000",
       outline: 5, shadow: 2, background: "", bold: false, uppercase: true, words_per_page: 3,
-      max_line_chars: 16, y: 0.72, x: 0, highlight_scale: 1.15,
+      max_line_chars: 16, y: 0.72, x: 0, highlight_scale: 1.15, animation: "pop",
     };
   }
 

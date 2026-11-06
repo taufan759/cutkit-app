@@ -11,6 +11,20 @@
   "use strict";
 
   const PAGE_GAP = 1.5;
+  /** Sama dengan POP_FACTOR / POP_MS di model.rs. */
+  const POP_FACTOR = 1.25;
+  const POP_MS = 120;
+
+  /** Skala kata aktif `since` detik setelah kata mulai (animasi pop libass \t linear). */
+  function activeScale(style, since) {
+    const hl = style.highlight_scale || 1;
+    if (style.animation !== "pop") return hl;
+    // libass membulatkan skala ke persen bulat, sama seperti di sini.
+    const from = Math.round(hl * POP_FACTOR * 100) / 100;
+    const to = Math.round(hl * 100) / 100;
+    const u = Math.min(1, Math.max(0, (since * 1000) / POP_MS));
+    return from + (to - from) * u;
+  }
 
   function round3(v) { return Math.round(v * 1000) / 1000; }
 
@@ -197,6 +211,7 @@
     if (!cue) return null;
     const page = pages[cue.page];
     return {
+      since: t - cue.start,
       lines: page.lines.map((line) => line.map((i) => ({ text: style.uppercase ? String(sorted[i].text).toUpperCase() : String(sorted[i].text), active: i === cue.active }))),
     };
   }
@@ -228,5 +243,5 @@
     return JSON.stringify({ words: sortedWords(words).map((w) => ({ text: w.text, start: w.start, end: w.end })) }, null, 2);
   }
 
-  return { PAGE_GAP, parseTime, parseSrt, srtToWords, parseWordsJson, textToWords, distribute, sortedWords, paginate, cues, frameAt, toSrt, toWordsJson, srtTime };
+  return { PAGE_GAP, POP_FACTOR, POP_MS, activeScale, parseTime, parseSrt, srtToWords, parseWordsJson, textToWords, distribute, sortedWords, paginate, cues, frameAt, toSrt, toWordsJson, srtTime };
 });
