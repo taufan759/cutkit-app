@@ -203,6 +203,8 @@ pub fn build_ass_window(project: &Project, t0: f64, t1: f64) -> Option<String> {
     let h = project.canvas.height;
     let mut styles = vec![];
     let mut events: Vec<Event> = vec![];
+    // (skala awal, skala akhir) animasi pop, untuk meneruskan animasi yang terpotong di t0.
+    let mut pop_scales: Option<(i64, i64)> = None;
 
     if project.captions.enabled {
         let st: &CaptionStyle = &project.captions.style;
@@ -215,6 +217,9 @@ pub fn build_ass_window(project: &Project, t0: f64, t1: f64) -> Option<String> {
             let scale = (st.highlight_scale * 100.0).round() as i64;
             let pop_from = (st.highlight_scale * POP_FACTOR * 100.0).round() as i64;
             let pop = st.animation == "pop";
+            if pop {
+                pop_scales = Some((pop_from, scale));
+            }
             let hl = ass_inline_color(&st.highlight_color);
             for cue in cues(&words, &pages) {
                 let page = &pages[cue.page];
@@ -267,7 +272,25 @@ pub fn build_ass_window(project: &Project, t0: f64, t1: f64) -> Option<String> {
     let events: Vec<Event> = events
         .into_iter()
         .filter(|e| e.end > t0 + 1e-9 && e.start < t1 - 1e-9)
-        .map(|e| Event { start: (e.start - t0).max(0.0), end: e.end.min(t1) - t0, ..e })
+        .map(|e| {
+            let cut_ms = ((t0 - e.start) * 1000.0).round() as i64;
+            let rest = match pop_scales {
+                // Kata yang mulai sebelum t0: animasi pop diteruskan dari skala saat t0, bukan diulang.
+                Some((from, to)) if cut_ms > 0 => {
+                    let pop_ms = POP_MS as i64;
+                    let pat = format!("\\fscx{from}\\fscy{from}\\t(0,{pop_ms},\\fscx{to}\\fscy{to})");
+                    let now = if cut_ms >= pop_ms {
+                        format!("\\fscx{to}\\fscy{to}")
+                    } else {
+                        let k = from + ((to - from) as f64 * cut_ms as f64 / pop_ms as f64).round() as i64;
+                        format!("\\fscx{k}\\fscy{k}\\t(0,{},\\fscx{to}\\fscy{to})", pop_ms - cut_ms)
+                    };
+                    e.rest.replace(&pat, &now)
+                }
+                _ => e.rest,
+            };
+            Event { start: (e.start - t0).max(0.0), end: e.end.min(t1) - t0, rest, ..e }
+        })
         .collect();
     if events.is_empty() {
         return None;
@@ -368,6 +391,12 @@ mod tests {
         p.captions.style.animation = "pop".into();
         let popped = build_ass(&p).unwrap();
         assert!(popped.contains("{\\c&H00E6FF&\\fscx144\\fscy144\\t(0,120,\\fscx115\\fscy115)}HALO{\\r} DUNIA"), "{popped}");
+        // Potongan yang mulai di tengah animasi pop meneruskan skala saat itu, bukan mengulang.
+        let mid = build_ass_window(&p, 0.06, 100.0).unwrap();
+        assert!(mid.contains("\\fscx129\\fscy129\\t(0,60,\\fscx115\\fscy115)}HALO"), "{mid}");
+        let late = build_ass_window(&p, 0.2, 100.0).unwrap();
+        assert!(late.contains("{\\c&H00E6FF&\\fscx115\\fscy115}HALO{\\r} DUNIA"), "pop HALO sudah selesai: {late}");
+        assert!(late.contains("\\fscx144\\fscy144\\t(0,120,\\fscx115\\fscy115)}DUNIA"), "DUNIA mulai sesudah t0, animasi utuh: {late}");
 
         // Potongan waktu: event digeser ke 0 dan dipotong di batas jendela.
         let win = build_ass_window(&p, 0.5, 2.0).unwrap();
