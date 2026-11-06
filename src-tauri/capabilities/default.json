@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Izin jendela utama: dialog file, event drag-drop dan progres, serta protokol asset untuk memutar media lokal.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "dialog:allow-message",
+    "dialog:allow-ask",
+    "core:window:allow-destroy",
+    "core:window:allow-close"
+  ]
+}
