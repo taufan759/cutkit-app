@@ -1,0 +1,23 @@
+[
+  {
+    "file": "fakta-shorts.json",
+    "name": "Fakta Shorts",
+    "description": "3 gambar dengan zoom pelan dan crossfade, judul di atas, kilat di awal, caption kuning.",
+    "ratio": "1080×1920",
+    "duration": 11.2
+  },
+  {
+    "file": "reaksi-meme.json",
+    "name": "Reaksi meme",
+    "description": "Video utama dengan latar blur, meme + SFX + zoom kejut di detik 2,5, teks reaksi.",
+    "ratio": "1080×1920",
+    "duration": 8
+  },
+  {
+    "file": "intro-youtube.json",
+    "name": "Intro YouTube 16:9",
+    "description": "Klip pembuka dengan zoom pelan, letterbox sinematik, judul besar, musik pelan, subtitle gaya YouTube.",
+    "ratio": "1920×1080",
+    "duration": 8
+  }
+]

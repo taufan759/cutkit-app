@@ -1,0 +1,358 @@
+{
+  "version": 1,
+  "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "background": "#000000"
+  },
+  "assets": [
+    {
+      "id": "utama",
+      "kind": "video",
+      "width": 1080,
+      "height": 1920,
+      "duration": 8,
+      "has_audio": true,
+      "has_video": true,
+      "slot": true,
+      "label": "Video utama"
+    },
+    {
+      "id": "meme",
+      "kind": "image",
+      "width": 600,
+      "height": 600,
+      "has_video": true,
+      "slot": true,
+      "label": "Gambar meme"
+    },
+    {
+      "id": "sfx",
+      "kind": "audio",
+      "duration": 1.5,
+      "has_audio": true,
+      "slot": true,
+      "label": "Sound effect"
+    }
+  ],
+  "tracks": [
+    {
+      "id": "v1",
+      "kind": "video",
+      "name": "Video utama",
+      "muted": false,
+      "hidden": false,
+      "clips": [
+        {
+          "id": "cmw4tenvo7wk",
+          "kind": "video",
+          "asset_id": "utama",
+          "start": 0,
+          "duration": 8,
+          "in": 0,
+          "fit": "cover",
+          "transform": {
+            "x": 0,
+            "y": 0,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1
+          },
+          "speed": 1,
+          "volume": 1,
+          "muted": false,
+          "fade_in": 0,
+          "fade_out": 0,
+          "motion": {
+            "kind": "none",
+            "amount": 0.15
+          },
+          "background": "blur",
+          "chroma": {
+            "enabled": false,
+            "color": "#00ff00",
+            "similarity": 0.3,
+            "blend": 0.1
+          },
+          "transition": {
+            "kind": "none",
+            "duration": 0.5
+          },
+          "color": {
+            "brightness": 1,
+            "contrast": 1,
+            "saturation": 1,
+            "hue": 0,
+            "temperature": 0,
+            "lut": ""
+          },
+          "text": null
+        }
+      ]
+    },
+    {
+      "id": "v2",
+      "kind": "video",
+      "name": "Overlay",
+      "muted": false,
+      "hidden": false,
+      "clips": [
+        {
+          "id": "cmw4tenvo834",
+          "kind": "image",
+          "asset_id": "meme",
+          "start": 2.5,
+          "duration": 2,
+          "in": 0,
+          "fit": "contain",
+          "transform": {
+            "x": 0,
+            "y": -420,
+            "scale": 0.6,
+            "rotation": 0,
+            "opacity": 1
+          },
+          "speed": 1,
+          "volume": 1,
+          "muted": false,
+          "fade_in": 0,
+          "fade_out": 0,
+          "motion": {
+            "kind": "none",
+            "amount": 0.15
+          },
+          "background": "none",
+          "chroma": {
+            "enabled": false,
+            "color": "#00ff00",
+            "similarity": 0.3,
+            "blend": 0.1
+          },
+          "transition": {
+            "kind": "none",
+            "duration": 0.5
+          },
+          "color": {
+            "brightness": 1,
+            "contrast": 1,
+            "saturation": 1,
+            "hue": 0,
+            "temperature": 0,
+            "lut": ""
+          },
+          "text": null
+        }
+      ]
+    },
+    {
+      "id": "vmw4tenvpdkj",
+      "kind": "video",
+      "name": "Video 4",
+      "muted": false,
+      "hidden": false,
+      "clips": [
+        {
+          "id": "tmw4tenvpclk",
+          "kind": "text",
+          "asset_id": null,
+          "start": 2.5,
+          "duration": 2,
+          "transform": {
+            "x": 0,
+            "y": 420,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1
+          },
+          "text": {
+            "text": "WKWKWK",
+            "style": {
+              "font": "Impact",
+              "size": 120,
+              "color": "#ffe600",
+              "outline_color": "#000000",
+              "outline": 7,
+              "shadow": 0,
+              "bold": false,
+              "italic": false,
+              "background": "",
+              "align": "center"
+            }
+          },
+          "in": 0,
+          "speed": 1,
+          "volume": 1,
+          "muted": false,
+          "fade_in": 0,
+          "fade_out": 0,
+          "fit": "contain",
+          "motion": {
+            "kind": "none",
+            "amount": 0.15
+          },
+          "background": "none",
+          "chroma": {
+            "enabled": false,
+            "color": "#00ff00",
+            "similarity": 0.3,
+            "blend": 0.1
+          },
+          "transition": {
+            "kind": "none",
+            "duration": 0.5
+          },
+          "color": {
+            "brightness": 1,
+            "contrast": 1,
+            "saturation": 1,
+            "hue": 0,
+            "temperature": 0,
+            "lut": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "vmw4tenvoagf",
+      "kind": "video",
+      "name": "Efek",
+      "muted": false,
+      "hidden": false,
+      "clips": [
+        {
+          "id": "emw4tenvob7s",
+          "kind": "effect",
+          "asset_id": null,
+          "start": 2.5,
+          "duration": 0.6,
+          "effect": {
+            "kind": "punch",
+            "intensity": 0.5
+          },
+          "in": 0,
+          "speed": 1,
+          "volume": 1,
+          "muted": false,
+          "fade_in": 0,
+          "fade_out": 0,
+          "fit": "contain",
+          "transform": {
+            "x": 0,
+            "y": 0,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1
+          },
+          "motion": {
+            "kind": "none",
+            "amount": 0.15
+          },
+          "background": "none",
+          "chroma": {
+            "enabled": false,
+            "color": "#00ff00",
+            "similarity": 0.3,
+            "blend": 0.1
+          },
+          "transition": {
+            "kind": "none",
+            "duration": 0.5
+          },
+          "color": {
+            "brightness": 1,
+            "contrast": 1,
+            "saturation": 1,
+            "hue": 0,
+            "temperature": 0,
+            "lut": ""
+          },
+          "text": null
+        }
+      ],
+      "role": "effects"
+    },
+    {
+      "id": "a1",
+      "kind": "audio",
+      "name": "Audio",
+      "muted": false,
+      "hidden": false,
+      "clips": [
+        {
+          "id": "cmw4tenvo92d",
+          "kind": "audio",
+          "asset_id": "sfx",
+          "start": 2.5,
+          "duration": 1.5,
+          "in": 0,
+          "fit": "contain",
+          "transform": {
+            "x": 0,
+            "y": 0,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1
+          },
+          "speed": 1,
+          "volume": 1,
+          "muted": false,
+          "fade_in": 0,
+          "fade_out": 0,
+          "motion": {
+            "kind": "none",
+            "amount": 0.15
+          },
+          "background": "none",
+          "chroma": {
+            "enabled": false,
+            "color": "#00ff00",
+            "similarity": 0.3,
+            "blend": 0.1
+          },
+          "transition": {
+            "kind": "none",
+            "duration": 0.5
+          },
+          "color": {
+            "brightness": 1,
+            "contrast": 1,
+            "saturation": 1,
+            "hue": 0,
+            "temperature": 0,
+            "lut": ""
+          },
+          "text": null
+        }
+      ]
+    }
+  ],
+  "captions": {
+    "enabled": false,
+    "words": [],
+    "style": {
+      "font": "Impact",
+      "size": 80,
+      "color": "#ffffff",
+      "highlight_color": "#ffe600",
+      "outline_color": "#000000",
+      "outline": 5,
+      "shadow": 2,
+      "background": "",
+      "bold": false,
+      "uppercase": true,
+      "words_per_page": 3,
+      "max_line_chars": 16,
+      "y": 0.72,
+      "x": 0,
+      "highlight_scale": 1.15,
+      "animation": "pop"
+    }
+  },
+  "template": {
+    "name": "Reaksi meme",
+    "description": "Video utama dengan latar blur, meme + SFX + zoom kejut di detik 2,5, teks reaksi.",
+    "ratio": "1080×1920",
+    "duration": 8
+  }
+}

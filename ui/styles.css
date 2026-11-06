@@ -223,6 +223,8 @@ input[type=range] { accent-color: var(--accent); }
 .clip.audio { background: var(--audio); }
 .clip.text { background: var(--text-clip); }
 .clip.effect { background: linear-gradient(135deg, #7a2f8f, #b0418a); }
+.tpl-list { display: flex; flex-direction: column; gap: 8px; }
+.tpl-card { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; background: var(--surface-2); border-radius: 10px; padding: 10px 12px; }
 .panel-h { margin: 6px 0 0; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .sticker-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
 .sticker { background: var(--surface-2); border: 1px solid transparent; border-radius: 8px; padding: 6px; cursor: pointer; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; }

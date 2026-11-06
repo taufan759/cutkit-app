@@ -289,6 +289,7 @@ function welcome() {
       el("button", { class: "btn primary", onclick: () => quickDialog({ fromWelcome: true }) }, "⚡ Buat video cepat", el("small", {}, "Shorts atau YouTube, dari voice over + gambar")),
       el("button", { class: "btn", onclick: newProjectDialog }, "＋ Proyek kosong", el("small", {}, "susun sendiri dari awal")),
       el("button", { class: "btn", onclick: openProjectDialog }, "📂 Buka proyek", el("small", {}, "file .cutkit.json")),
+      el("button", { class: "btn", onclick: () => templateDialog() }, "📐 Dari template", el("small", {}, "susunan siap pakai, tinggal ganti media")),
       el("button", { class: "btn", id: "demo-btn", onclick: () => demoProject() }, "🎬 Coba contoh", el("small", {}, "proyek latihan siap putar"))),
     recents.length ? el("h4", {}, "Terakhir dibuka") : null,
     recents.length ? el("div", { class: "recent" }, recents.map((r) => el("button", { onclick: () => openProjectPath(r.path) },
@@ -840,6 +841,115 @@ function renderFxPanel() {
   ];
   if (window.renderStickerSection) sections.push(...window.renderStickerSection());
   panel.replaceChildren(...sections);
+}
+
+/* ---------- template ---------- */
+
+async function loadTemplates() {
+  const list = [];
+  try {
+    const index = await (await fetch("templates/index.json")).json();
+    for (const it of index) list.push(Object.assign({ builtin: true, src: `templates/${it.file}` }, it));
+  } catch { /* */ }
+  try { for (const t of await invoke("list_templates")) list.push(Object.assign({ builtin: false, src: t.path }, t)); } catch { /* */ }
+  return list;
+}
+
+async function readTemplate(item) {
+  if (item.builtin) return (await fetch(item.src)).json();
+  return JSON.parse(await invoke("read_text", { path: item.src }));
+}
+
+async function templateDialog() {
+  const list = await loadTemplates();
+  const card = (it) => el("div", { class: "tpl-card" },
+    el("div", {}, el("b", {}, it.name), el("div", { class: "hint" }, `${it.ratio} · ${it.duration} detik${it.builtin ? " · bawaan" : ""}`), el("div", { class: "hint" }, it.description || "")),
+    el("div", { class: "btn-row" },
+      el("button", { class: "btn small primary", onclick: () => useTemplateDialog(it) }, "Pakai"),
+      it.builtin ? null : el("button", { class: "btn small danger", onclick: async () => {
+        if (!(await ask(`Hapus template "${it.name}"?`))) return;
+        try { await invoke("delete_template", { path: it.src }); templateDialog(); } catch (e) { toast(errMsg(e), true); }
+      } }, "Hapus")));
+  openModal(el("h2", {}, "📐 Template"),
+    el("p", { class: "hint" }, "Susunan siap pakai: teks, efek, transisi, gerak, dan gaya caption sudah diatur. Tinggal pilih gambar/video/suara pengganti."),
+    el("div", { class: "tpl-list" }, list.map(card)),
+    el("p", { class: "hint" }, "Simpan proyekmu sendiri jadi template lewat menu Proyek → Simpan sebagai template."),
+    el("div", { class: "modal-actions" }, el("button", { class: "btn", onclick: () => (state.path ? closeModal() : welcome()) }, "Tutup")));
+}
+
+async function useTemplateDialog(item) {
+  let t;
+  try { t = await readTemplate(item); } catch (e) { return toast(errMsg(e), true); }
+  const slots = CK.templates.slots(t);
+  const picks = {};
+  const name = el("input", { type: "text", value: `${item.name} ${new Date().toLocaleDateString("id-ID").replace(/\//g, "-")}` });
+  const exts = { video: VIDEO_EXT, image: IMAGE_EXT, audio: AUDIO_EXT };
+  const rows = slots.map((sl) => {
+    const chosen = el("span", { class: "hint", style: "flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, "— dilewati");
+    const pick = el("button", { class: "btn small" }, "Pilih…");
+    pick.addEventListener("click", async () => {
+      // Slot gambar boleh diisi video dan sebaliknya.
+      const allowed = sl.kind === "audio" ? AUDIO_EXT : [...IMAGE_EXT, ...VIDEO_EXT];
+      const path = await tauri.dialog.open({ filters: [{ name: sl.label, extensions: allowed }, { name: "Semua media", extensions: [...VIDEO_EXT, ...IMAGE_EXT, ...AUDIO_EXT] }] });
+      if (!path) return;
+      picks[sl.id] = path;
+      chosen.textContent = baseName(path);
+    });
+    void exts;
+    return el("div", { class: "field" }, el("label", {}, sl.label), el("div", { class: "ctl" }, chosen, pick));
+  });
+  const go = el("button", { class: "btn primary" }, "Buat proyek");
+  go.addEventListener("click", async () => {
+    if (!Object.keys(picks).length && !(await ask("Belum ada media yang dipilih. Buat proyek hanya dengan teks dan efek?"))) return;
+    go.disabled = true;
+    try {
+      let parent;
+      try { parent = joinPath(await tauri.path.documentDir(), "CutKit"); } catch { parent = "C:\\CutKit"; }
+      const nm = name.value.trim() || item.name;
+      await setProject(TL.newProject(nm, "9:16"), joinPath(joinPath(parent, safeName(nm)), projectFileName(nm)));
+      const paths = Object.values(picks);
+      const assets = paths.length ? await importPaths(paths) : [];
+      const byPath = new Map(assets.map((a) => [a.path.toLowerCase(), a]));
+      const real = {};
+      for (const [slot, path] of Object.entries(picks)) real[slot] = byPath.get(path.toLowerCase()) || null;
+      const p = TL.normalize(CK.templates.applyTemplate(t, real, nm));
+      state.history.record(state.project);
+      state.project = p;
+      changed({ captions: true });
+      syncProjectControls();
+      await save().catch(() => {});
+      closeModal();
+      preview.seek(0);
+      tlView.fit();
+      toast("Proyek dari template siap. Ganti teks judul di inspector, lalu ekspor.");
+    } catch (e) { toast(errMsg(e), true); go.disabled = false; }
+  });
+  openModal(el("h2", {}, `📐 ${item.name}`),
+    el("p", { class: "hint" }, item.description || ""),
+    field("Nama proyek", name),
+    el("h4", { class: "panel-h" }, "Media pengganti"),
+    ...rows,
+    el("p", { class: "hint" }, "Slot yang dilewati beserta klipnya dibuang. Video yang lebih pendek dari slotnya dipangkas otomatis."),
+    el("div", { class: "modal-actions" }, el("button", { class: "btn", onclick: () => templateDialog() }, "Kembali"), go));
+}
+
+function saveTemplateDialog() {
+  if (TL.duration(state.project) <= 0) return toast("Timeline masih kosong.", true);
+  const name = el("input", { type: "text", value: state.project.name });
+  const desc = el("textarea", { rows: 3, placeholder: "Keterangan singkat (opsional)" });
+  const go = el("button", { class: "btn primary" }, "Simpan template");
+  go.addEventListener("click", async () => {
+    try {
+      const t = CK.templates.makeTemplate(cleanProject(), { name: name.value.trim() || "Template", description: desc.value.trim() });
+      await invoke("save_template", { name: t.template.name, template: t });
+      closeModal();
+      toast(`Template "${t.template.name}" disimpan. Pakai lewat menu Proyek → Dari template.`);
+    } catch (e) { toast(errMsg(e), true); }
+  });
+  openModal(el("h2", {}, "Simpan sebagai template"),
+    el("p", { class: "hint" }, "Susunan proyek ini (teks, efek, transisi, gerak, gaya caption) disimpan; media diganti slot yang nanti dipilih ulang. Kata caption tidak ikut disimpan."),
+    field("Nama", name), desc,
+    el("div", { class: "modal-actions" }, el("button", { class: "btn", onclick: closeModal }, "Batal"), go));
 }
 
 /* ---------- stiker emoji (Twemoji, CC-BY 4.0) ---------- */
@@ -2140,6 +2250,8 @@ function wire() {
     const cmd = e.target.closest("button")?.dataset.cmd;
     if (cmd === "quick") quickDialog();
     else if (cmd === "new") newProjectDialog();
+    else if (cmd === "template") templateDialog();
+    else if (cmd === "savetemplate") saveTemplateDialog();
     else if (cmd === "open") openProjectDialog();
     else if (cmd === "save") save().catch((err) => toast(errMsg(err), true));
     else if (cmd === "saveas") saveAs().catch((err) => toast(errMsg(err), true));

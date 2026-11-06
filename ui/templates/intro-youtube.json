@@ -1,0 +1,295 @@
+{
+  "version": 1,
+  "canvas": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "background": "#000000"
+  },
+  "assets": [
+    {
+      "id": "klip",
+      "kind": "video",
+      "width": 1920,
+      "height": 1080,
+      "duration": 8,
+      "has_audio": true,
+      "has_video": true,
+      "slot": true,
+      "label": "Video pembuka"
+    },
+    {
+      "id": "musik",
+      "kind": "audio",
+      "duration": 8,
+      "has_audio": true,
+      "slot": true,
+      "label": "Musik"
+    }
+  ],
+  "tracks": [
+    {
+      "id": "v1",
+      "kind": "video",
+      "name": "Video utama",
+      "muted": false,
+      "hidden": false,
+      "clips": [
+        {
+          "id": "cmw4tenvqerv",
+          "kind": "video",
+          "asset_id": "klip",
+          "start": 0,
+          "duration": 8,
+          "in": 0,
+          "fit": "cover",
+          "transform": {
+            "x": 0,
+            "y": 0,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1
+          },
+          "speed": 1,
+          "volume": 1,
+          "muted": false,
+          "fade_in": 0,
+          "fade_out": 0,
+          "motion": {
+            "kind": "zoom-in",
+            "amount": 0.08
+          },
+          "background": "none",
+          "chroma": {
+            "enabled": false,
+            "color": "#00ff00",
+            "similarity": 0.3,
+            "blend": 0.1
+          },
+          "transition": {
+            "kind": "none",
+            "duration": 0.5
+          },
+          "color": {
+            "brightness": 1,
+            "contrast": 1,
+            "saturation": 1,
+            "hue": 0,
+            "temperature": 0,
+            "lut": ""
+          },
+          "text": null
+        }
+      ]
+    },
+    {
+      "id": "v2",
+      "kind": "video",
+      "name": "Overlay",
+      "muted": false,
+      "hidden": false,
+      "clips": [
+        {
+          "id": "tmw4tenvqg80",
+          "kind": "text",
+          "asset_id": null,
+          "start": 0.5,
+          "duration": 3.5,
+          "transform": {
+            "x": 0,
+            "y": 0,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1
+          },
+          "text": {
+            "text": "JUDUL VIDEO",
+            "style": {
+              "font": "Arial Black",
+              "size": 130,
+              "color": "#ffffff",
+              "outline_color": "#000000",
+              "outline": 6,
+              "shadow": 0,
+              "bold": false,
+              "italic": false,
+              "background": "",
+              "align": "center"
+            }
+          },
+          "in": 0,
+          "speed": 1,
+          "volume": 1,
+          "muted": false,
+          "fade_in": 0,
+          "fade_out": 0,
+          "fit": "contain",
+          "motion": {
+            "kind": "none",
+            "amount": 0.15
+          },
+          "background": "none",
+          "chroma": {
+            "enabled": false,
+            "color": "#00ff00",
+            "similarity": 0.3,
+            "blend": 0.1
+          },
+          "transition": {
+            "kind": "none",
+            "duration": 0.5
+          },
+          "color": {
+            "brightness": 1,
+            "contrast": 1,
+            "saturation": 1,
+            "hue": 0,
+            "temperature": 0,
+            "lut": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "vmw4tenvqhtm",
+      "kind": "video",
+      "name": "Efek",
+      "muted": false,
+      "hidden": false,
+      "clips": [
+        {
+          "id": "emw4tenvqi31",
+          "kind": "effect",
+          "asset_id": null,
+          "start": 0,
+          "duration": 8,
+          "effect": {
+            "kind": "letterbox",
+            "intensity": 0.3
+          },
+          "in": 0,
+          "speed": 1,
+          "volume": 1,
+          "muted": false,
+          "fade_in": 0,
+          "fade_out": 0,
+          "fit": "contain",
+          "transform": {
+            "x": 0,
+            "y": 0,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1
+          },
+          "motion": {
+            "kind": "none",
+            "amount": 0.15
+          },
+          "background": "none",
+          "chroma": {
+            "enabled": false,
+            "color": "#00ff00",
+            "similarity": 0.3,
+            "blend": 0.1
+          },
+          "transition": {
+            "kind": "none",
+            "duration": 0.5
+          },
+          "color": {
+            "brightness": 1,
+            "contrast": 1,
+            "saturation": 1,
+            "hue": 0,
+            "temperature": 0,
+            "lut": ""
+          },
+          "text": null
+        }
+      ],
+      "role": "effects"
+    },
+    {
+      "id": "a1",
+      "kind": "audio",
+      "name": "Audio",
+      "muted": false,
+      "hidden": false,
+      "clips": [
+        {
+          "id": "cmw4tenvqfah",
+          "kind": "audio",
+          "asset_id": "musik",
+          "start": 0,
+          "duration": 8,
+          "in": 0,
+          "fit": "contain",
+          "transform": {
+            "x": 0,
+            "y": 0,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1
+          },
+          "speed": 1,
+          "volume": 0.3,
+          "muted": false,
+          "fade_in": 1,
+          "fade_out": 1.5,
+          "motion": {
+            "kind": "none",
+            "amount": 0.15
+          },
+          "background": "none",
+          "chroma": {
+            "enabled": false,
+            "color": "#00ff00",
+            "similarity": 0.3,
+            "blend": 0.1
+          },
+          "transition": {
+            "kind": "none",
+            "duration": 0.5
+          },
+          "color": {
+            "brightness": 1,
+            "contrast": 1,
+            "saturation": 1,
+            "hue": 0,
+            "temperature": 0,
+            "lut": ""
+          },
+          "text": null
+        }
+      ]
+    }
+  ],
+  "captions": {
+    "enabled": true,
+    "words": [],
+    "style": {
+      "font": "Segoe UI",
+      "size": 54,
+      "color": "#ffffff",
+      "highlight_color": "#ffffff",
+      "outline_color": "#000000",
+      "outline": 10,
+      "shadow": 0,
+      "background": "#000000a8",
+      "bold": true,
+      "uppercase": false,
+      "words_per_page": 8,
+      "max_line_chars": 42,
+      "y": 0.88,
+      "x": 0,
+      "highlight_scale": 1,
+      "animation": "none"
+    }
+  },
+  "template": {
+    "name": "Intro YouTube 16:9",
+    "description": "Klip pembuka dengan zoom pelan, letterbox sinematik, judul besar, musik pelan, subtitle gaya YouTube.",
+    "ratio": "1920×1080",
+    "duration": 8
+  }
+}

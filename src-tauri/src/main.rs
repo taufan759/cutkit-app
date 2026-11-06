@@ -23,6 +23,7 @@ struct AppState {
     ai_cancel: Mutex<Option<Arc<AtomicBool>>>,
     settings_path: PathBuf,
     default_models_dir: PathBuf,
+    templates_dir: PathBuf,
 }
 
 #[derive(Serialize, serde::Deserialize, Clone, Default)]
@@ -206,6 +207,60 @@ fn write_atomic(path: &Path, text: &str) -> Result<(), String> {
     let tmp = path.with_extension("cutkit-tmp");
     std::fs::write(&tmp, text).map_err(|e| format!("Gagal menyimpan: {e}"))?;
     std::fs::rename(&tmp, path).map_err(|e| format!("Gagal menyimpan: {e}"))
+}
+
+#[derive(Serialize)]
+struct TemplateInfo {
+    path: String,
+    name: String,
+    description: String,
+    ratio: String,
+    duration: f64,
+}
+
+/// Template buatan pengguna di folder pengaturan aplikasi.
+#[tauri::command]
+fn list_templates(state: State<AppState>) -> Vec<TemplateInfo> {
+    let mut out = vec![];
+    if let Ok(entries) = std::fs::read_dir(&state.templates_dir) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.extension().and_then(|x| x.to_str()) != Some("json") {
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(&p) else { continue };
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
+            let t = &v["template"];
+            out.push(TemplateInfo {
+                path: p.to_string_lossy().to_string(),
+                name: t["name"].as_str().unwrap_or("Template").to_string(),
+                description: t["description"].as_str().unwrap_or("").to_string(),
+                ratio: t["ratio"].as_str().unwrap_or("").to_string(),
+                duration: t["duration"].as_f64().unwrap_or(0.0),
+            });
+        }
+    }
+    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out
+}
+
+#[tauri::command]
+fn save_template(name: String, template: serde_json::Value, state: State<AppState>) -> Result<String, String> {
+    let safe: String = name.chars().filter(|c| c.is_alphanumeric() || " -_".contains(*c)).collect::<String>().trim().to_string();
+    let safe = if safe.is_empty() { "template".to_string() } else { safe };
+    let path = state.templates_dir.join(format!("{safe}.json"));
+    write_atomic(&path, &serde_json::to_string_pretty(&template).map_err(|e| e.to_string())?)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn delete_template(path: String, state: State<AppState>) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    // Hanya file di folder template yang boleh dihapus.
+    if p.parent().map(|d| d != state.templates_dir).unwrap_or(true) {
+        return Err("Hanya template buatan sendiri yang bisa dihapus.".into());
+    }
+    std::fs::remove_file(p).map_err(|e| e.to_string())
 }
 
 /// Menulis data biner (base64, boleh berupa data URL) ke file, mis. stiker PNG hasil render.
@@ -519,6 +574,7 @@ fn main() {
                 export_cancel: Mutex::new(None),
                 ai_cancel: Mutex::new(None),
                 settings_path: config_dir.join("settings.json"),
+                templates_dir: config_dir.join("templates"),
                 default_models_dir: data_dir.join("models"),
             });
             Ok(())
@@ -534,6 +590,9 @@ fn main() {
             read_text,
             write_text,
             write_binary,
+            list_templates,
+            save_template,
+            delete_template,
             list_dir,
             path_exists,
             export_start,

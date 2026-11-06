@@ -138,6 +138,9 @@ const commands = {
     return { path: outPath, duration: t, sentences: timed };
   },
   detect_beats: () => ({ bpm: 120, beats: Array.from({ length: 120 }, (_, i) => +(0.25 + i * 0.5).toFixed(3)), downbeats: Array.from({ length: 30 }, (_, i) => +(0.25 + i * 2).toFixed(3)) }),
+  list_templates: () => [],
+  save_template: ({ name }) => path.join(CACHE, `${name}.json`),
+  delete_template: () => null,
   open_path: () => null,
   reveal_path: () => null,
 };
