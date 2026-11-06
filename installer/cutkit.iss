@@ -66,7 +66,6 @@ InstallingLabel=Tunggu sebentar, CutKit sedang dipasang dan disiapkan...
 FinishedHeadingLabel=CutKit sudah terpasang
 FinishedLabelNoIcons=CutKit sudah siap dipakai.%n%nBuka "CutKit" dari Start Menu kapan saja. Di layar pertama, coba "Coba contoh" untuk latihan atau "Buat video cepat" untuk langsung membuat video.
 FinishedLabel=CutKit sudah siap dipakai.%n%nBuka "CutKit" dari Start Menu kapan saja. Di layar pertama, coba "Coba contoh" untuk latihan atau "Buat video cepat" untuk langsung membuat video.
-RunEntryExec=Buka CutKit sekarang
 ConfirmUninstall=Hapus CutKit dari komputer ini?%n%nProyek, video, dan template buatanmu TIDAK akan dihapus.
 UninstalledAll=CutKit sudah dihapus. Proyek dan video buatanmu tetap utuh.
 
@@ -79,6 +78,7 @@ TaskTts=Suara TTS Bahasa Indonesia: Piper (±85 MB)
 GroupExtra=Tambahan:
 TaskClaude=Hubungkan ke Claude (MCP) supaya Claude bisa mengedit lewat chat (Node.js portabel ±30 MB bila belum ada)
 TaskDesktop=Buat shortcut di Desktop
+OpenNow=Buka CutKit sekarang
 RunSetup=Menyiapkan CutKit: WebView2, ffmpeg, dan model AI...
 AskModels=Hapus juga model AI (Whisper, Piper, hapus background) yang sudah diunduh?%n%nPilih Tidak kalau ingin memakainya lagi setelah memasang ulang CutKit.
 
@@ -105,7 +105,7 @@ Name: "{autodesktop}\CutKit"; Filename: "{app}\cutkit-app.exe"; Tasks: desktop
 [Run]
 ; Jendela konsol sengaja terlihat supaya progres unduhan dan pesan error bisa dibaca.
 Filename: "{app}\mcp\cutkit-cli.exe"; Parameters: "setup --installer{code:SetupFlags}"; StatusMsg: "{cm:RunSetup}"; Flags: waituntilterminated
-Filename: "{app}\cutkit-app.exe"; Description: "{cm:RunEntryExec}"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\cutkit-app.exe"; Description: "{cm:OpenNow}"; Flags: postinstall nowait skipifsilent
 
 [UninstallDelete]
 ; Hanya file milik CutKit; proyek dan video tidak pernah disentuh.
