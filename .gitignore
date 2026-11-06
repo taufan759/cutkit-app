@@ -2,3 +2,4 @@
 /target
 /src-tauri/gen
 *.cutkit-tmp
+/installer/Output
