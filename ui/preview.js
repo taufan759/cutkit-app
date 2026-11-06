@@ -360,7 +360,12 @@
           ctx.globalAlpha = Math.max(0, Math.min(1, clip.transform.opacity));
           ctx.translate(pl.cx, pl.cy);
           ctx.rotate(pl.rad);
-          if (source) ctx.drawImage(source, -pl.w / 2, -pl.h / 2, pl.w, pl.h);
+          if (source && GEO.motionActive(clip.motion)) {
+            const sw = source.videoWidth || source.naturalWidth || pl.w;
+            const sh = source.videoHeight || source.naturalHeight || pl.h;
+            const [sx, sy, rw, rh] = GEO.motionRect(clip.motion, (t - clip.start) / clip.duration, sw, sh);
+            ctx.drawImage(source, sx, sy, rw, rh, -pl.w / 2, -pl.h / 2, pl.w, pl.h);
+          } else if (source) ctx.drawImage(source, -pl.w / 2, -pl.h / 2, pl.w, pl.h);
           else {
             ctx.fillStyle = asset.missing ? "rgba(200,40,40,.35)" : "rgba(255,255,255,.06)";
             ctx.fillRect(-pl.w / 2, -pl.h / 2, pl.w, pl.h);

@@ -115,6 +115,8 @@ pub struct Clip {
     pub fade_out: f64,
     pub fit: Fit,
     pub transform: Transform,
+    /// Gerak isi klip (Ken Burns): zoom atau geser pelan di dalam bingkai klip.
+    pub motion: Motion,
     pub text: Option<TextClip>,
 }
 
@@ -134,6 +136,7 @@ impl Default for Clip {
             fade_out: 0.0,
             fit: Fit::Contain,
             transform: Transform::default(),
+            motion: Motion::default(),
             text: None,
         }
     }
@@ -175,6 +178,63 @@ impl Default for Transform {
     fn default() -> Self {
         Transform { x: 0.0, y: 0.0, scale: 1.0, rotation: 0.0, opacity: 1.0 }
     }
+}
+
+/// Jenis gerak: none, zoom-in, zoom-out, pan-left, pan-right, pan-up, pan-down.
+/// `amount` = tambahan zoom (0.15 = 15% lebih dekat di ujung gerak).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct Motion {
+    pub kind: String,
+    pub amount: f64,
+}
+
+impl Default for Motion {
+    fn default() -> Self {
+        Motion { kind: "none".into(), amount: 0.15 }
+    }
+}
+
+impl Motion {
+    pub fn is_active(&self) -> bool {
+        matches!(self.kind.as_str(), "zoom-in" | "zoom-out" | "pan-left" | "pan-right" | "pan-up" | "pan-down") && self.amount > 0.0
+    }
+
+    /// Zoom dan titik fokus (0..1, 0.5 = tengah) pada kemajuan `u` (0..1). Sama dengan `motionAt` di ui/core/geometry.js.
+    pub fn at(&self, u: f64) -> (f64, f64, f64) {
+        let u = u.clamp(0.0, 1.0);
+        let a = self.amount.clamp(0.0, 2.0);
+        match self.kind.as_str() {
+            "zoom-in" => (1.0 + a * u, 0.5, 0.5),
+            "zoom-out" => (1.0 + a * (1.0 - u), 0.5, 0.5),
+            "pan-left" => (1.0 + a, 1.0 - u, 0.5),
+            "pan-right" => (1.0 + a, u, 0.5),
+            "pan-up" => (1.0 + a, 0.5, 1.0 - u),
+            "pan-down" => (1.0 + a, 0.5, u),
+            _ => (1.0, 0.5, 0.5),
+        }
+    }
+
+    /// Ekspresi zoompan (z, x, y) dengan `u` = kemajuan frame keluaran.
+    pub fn zoompan_exprs(&self, frames: u64) -> (String, String, String) {
+        let a = fmt_num(self.amount.clamp(0.0, 2.0));
+        let u = if frames > 1 { format!("min(on/{},1)", frames - 1) } else { "0".to_string() };
+        let (z, px, py) = match self.kind.as_str() {
+            "zoom-in" => (format!("1+{a}*{u}"), "0.5".to_string(), "0.5".to_string()),
+            "zoom-out" => (format!("1+{a}*(1-{u})"), "0.5".into(), "0.5".into()),
+            "pan-left" => (format!("1+{a}"), format!("(1-{u})"), "0.5".into()),
+            "pan-right" => (format!("1+{a}"), u.clone(), "0.5".into()),
+            "pan-up" => (format!("1+{a}"), "0.5".into(), format!("(1-{u})")),
+            "pan-down" => (format!("1+{a}"), "0.5".into(), u.clone()),
+            _ => ("1".into(), "0.5".into(), "0.5".into()),
+        };
+        (z, format!("(iw-iw/zoom)*{px}"), format!("(ih-ih/zoom)*{py}"))
+    }
+}
+
+fn fmt_num(v: f64) -> String {
+    let s = format!("{:.4}", v);
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]

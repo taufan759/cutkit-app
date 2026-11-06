@@ -3,7 +3,7 @@
 
 use cutkit_core::ass::{cues, paginate};
 use cutkit_core::layout::place;
-use cutkit_core::{Fit, Transform, Word};
+use cutkit_core::{Fit, Motion, Transform, Word};
 use serde_json::Value;
 
 fn fixture() -> Value {
@@ -30,6 +30,18 @@ fn pagination_matches_fixture() {
             assert_eq!(c.page, w[0].as_u64().unwrap() as usize);
             assert_eq!(c.active, w[1].as_u64().unwrap() as usize);
             assert!((c.start - f(&w[2])).abs() < 1e-9 && (c.end - f(&w[3])).abs() < 1e-9, "{c:?} vs {w:?}");
+        }
+    }
+}
+
+#[test]
+fn motion_matches_fixture() {
+    for case in fixture()["motion"].as_array().unwrap() {
+        let m = Motion { kind: case["kind"].as_str().unwrap().into(), amount: f(&case["amount"]) };
+        let (z, px, py) = m.at(f(&case["u"]));
+        let want = case["out"].as_array().unwrap();
+        for (got, w) in [z, px, py].iter().zip(want) {
+            assert!((got - f(w)).abs() < 1e-9, "kasus {case}: {z} {px} {py}");
         }
     }
 }

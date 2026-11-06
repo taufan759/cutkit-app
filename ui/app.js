@@ -1044,6 +1044,18 @@ function renderInspector() {
         el("button", { class: "btn small", onclick: () => commit((pp) => TL.updateClip(pp, c.id, { transform: TL.defaultTransform() })) }, "Reset"))));
   }
 
+  if (c.kind === "video" || c.kind === "image") {
+    const MOTION_LABELS = [["none", "Diam"], ["zoom-in", "Zoom masuk"], ["zoom-out", "Zoom keluar"], ["pan-left", "Geser ←"], ["pan-right", "Geser →"], ["pan-up", "Geser ↑"], ["pan-down", "Geser ↓"]];
+    sections.push(el("section", {},
+      el("h4", {}, "Gerak (Ken Burns)"),
+      el("div", { class: "btn-row" }, MOTION_LABELS.map(([k, label]) => el("button", {
+        class: "btn small" + (c.motion.kind === k ? " primary" : ""),
+        onclick: () => commit((pp) => TL.updateClip(pp, c.id, { motion: { kind: k } })),
+      }, label))),
+      c.motion.kind !== "none" ? slider("Kekuatan", c.motion.amount, { min: 2, max: 60, unit: "%", fromModel: (v) => v * 100, toModel: (v) => v / 100, apply: (v) => upd({ motion: { amount: v } }) }) : null,
+      el("p", { class: "hint" }, "Isi klip bergerak pelan di dalam bingkainya, cocok untuk gambar diam.")));
+  }
+
   if (c.kind === "video" || c.kind === "audio") {
     const sp = TL.speedOf(c);
     const speedInput = el("input", { type: "number", min: 0.1, max: 10, step: 0.05, value: sp });
@@ -1244,7 +1256,7 @@ async function readCaptionWords(path) {
 }
 
 function quickDialog(opts = {}) {
-  const sel = { voice: null, visuals: [], music: null, caption: null, script: "", musicVolume: 15, fit: "cover", capPreset: 0 };
+  const sel = { voice: null, visuals: [], music: null, caption: null, script: "", musicVolume: 15, fit: "cover", capPreset: 0, motion: true };
   const needsProject = !state.path || opts.fromWelcome;
   const name = el("input", { type: "text", value: `Shorts ${new Date().toLocaleDateString("id-ID").replace(/\//g, "-")}` });
   const summary = el("div", { class: "quick-summary" });
@@ -1301,6 +1313,7 @@ function quickDialog(opts = {}) {
     row("Musik latar", el("button", { class: "btn small", onclick: pickFile("music", [{ name: "Audio", extensions: AUDIO_EXT }]) }, "Pilih…"), el("button", { class: "btn small ghost", onclick: clear("music") }, "Kosongkan")),
     row("Volume musik", vol, volLabel),
     row("Gambar", segmented([["cover", "Penuh layar"], ["contain", "Utuh (ada pinggiran)"]], sel.fit, (v) => { sel.fit = v; })),
+    row("Gerak", el("label", { class: "check" }, el("input", { type: "checkbox", checked: sel.motion, onchange: (e) => { sel.motion = e.target.checked; } }), "Zoom pelan otomatis di gambar (Ken Burns)")),
     row("Gaya caption", segmented(CAPTION_PRESETS.map((pr, i) => [i, pr.name]), sel.capPreset, (v) => { sel.capPreset = v; })),
     script,
     summary,
@@ -1333,7 +1346,7 @@ async function runQuick(sel, newName) {
     words = CAP.textToWords(sel.script, 0, end);
   }
   commit((p) => {
-    TL.autoAssemble(p, { voice, visuals, music, words, musicVolume: sel.musicVolume / 100, fit: sel.fit });
+    TL.autoAssemble(p, { voice, visuals, music, words, musicVolume: sel.musicVolume / 100, fit: sel.fit, motion: sel.motion !== false });
     Object.assign(p.captions.style, CAPTION_PRESETS[sel.capPreset].style);
   }, { captions: true });
   closeModal();

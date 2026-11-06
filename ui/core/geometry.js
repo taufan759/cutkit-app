@@ -53,5 +53,32 @@
     });
   }
 
-  return { place, hitTest, corners, rround };
+  const MOTIONS = ["none", "zoom-in", "zoom-out", "pan-left", "pan-right", "pan-up", "pan-down"];
+
+  /** Zoom dan titik fokus (0..1) pada kemajuan u; sama dengan Motion::at di Rust. */
+  function motionAt(m, u) {
+    u = Math.min(1, Math.max(0, u));
+    const a = Math.min(2, Math.max(0, (m && m.amount) || 0));
+    switch (m && m.kind) {
+      case "zoom-in": return [1 + a * u, 0.5, 0.5];
+      case "zoom-out": return [1 + a * (1 - u), 0.5, 0.5];
+      case "pan-left": return [1 + a, 1 - u, 0.5];
+      case "pan-right": return [1 + a, u, 0.5];
+      case "pan-up": return [1 + a, 0.5, 1 - u];
+      case "pan-down": return [1 + a, 0.5, u];
+      default: return [1, 0.5, 0.5];
+    }
+  }
+
+  function motionActive(m) { return !!m && MOTIONS.includes(m.kind) && m.kind !== "none" && m.amount > 0; }
+
+  /** Potongan sumber (sx, sy, sw, sh) yang terlihat untuk gerak `m` pada kemajuan u. */
+  function motionRect(m, u, srcW, srcH) {
+    const [z, px, py] = motionAt(m, u);
+    const sw = srcW / z;
+    const sh = srcH / z;
+    return [(srcW - sw) * px, (srcH - sh) * py, sw, sh];
+  }
+
+  return { place, hitTest, corners, rround, motionAt, motionActive, motionRect, MOTIONS };
 });

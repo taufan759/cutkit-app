@@ -98,6 +98,7 @@
     c.fade_out = +c.fade_out || 0;
     c.fit = c.fit || "contain";
     c.transform = Object.assign(defaultTransform(), c.transform || {});
+    c.motion = Object.assign({ kind: "none", amount: 0.15 }, c.motion || {});
     if (c.kind === "text") {
       c.text = c.text || { text: "", style: defaultTextStyle() };
       c.text.style = Object.assign(defaultTextStyle(), c.text.style || {});
@@ -394,6 +395,7 @@
     const { clip } = mustFind(p, clipId);
     for (const [k, v] of Object.entries(patch)) {
       if (k === "transform") Object.assign(clip.transform, v);
+      else if (k === "motion") Object.assign(clip.motion, v);
       else if (k === "text") {
         clip.text = clip.text || { text: "", style: defaultTextStyle() };
         if (v.text != null) clip.text.text = v.text;
@@ -554,7 +556,7 @@
    *  - words (opsional) jadi caption
    * Isi timeline lama dihapus. Mengembalikan durasi total.
    */
-  function autoAssemble(p, { voice = null, visuals = [], music = null, words = null, musicVolume = 0.15, fit = "cover" } = {}) {
+  function autoAssemble(p, { voice = null, visuals = [], music = null, words = null, musicVolume = 0.15, fit = "cover", motion = false } = {}) {
     if (!visuals.length && !voice) throw new Error("Pilih minimal satu voice over atau gambar/video.");
     for (const t of p.tracks) t.clips = [];
     const wordsEnd = words && words.length ? Math.max(...words.map((w) => w.end)) : 0;
@@ -580,6 +582,8 @@
       const bounds = [0, ...cuts, total];
       visuals.forEach((asset, i) => {
         const clip = clipFromAsset(asset, { fit });
+        // Gerak otomatis: gambar diam bergantian zoom masuk/keluar agar tidak terasa statis.
+        if (motion && asset.kind === "image") clip.motion = { kind: i % 2 ? "zoom-out" : "zoom-in", amount: 0.12 };
         clip.start = round(bounds[i]);
         let dur = round(bounds[i + 1] - bounds[i]);
         if (asset.kind === "video" && asset.duration > 0) dur = Math.min(dur, asset.duration);

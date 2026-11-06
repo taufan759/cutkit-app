@@ -260,3 +260,14 @@ test("kecepatan: setSpeed mengubah durasi, menggeser klip sesudahnya, split dan 
   assert.equal(T.speedOf({ kind: "image", speed: 3 }), 1);
   assert.equal(T.speedOf({ kind: "video", speed: 50 }), 10);
 });
+
+test("autoAssemble dengan gerak otomatis: gambar bergantian zoom masuk/keluar, video tidak", () => {
+  const p = T.newProject();
+  const vis = [{ id: "a", kind: "image", width: 1, height: 1 }, { id: "v", kind: "video", duration: 2, width: 1, height: 1 }, { id: "b", kind: "image", width: 1, height: 1 }];
+  T.autoAssemble(p, { visuals: vis, motion: true });
+  assert.deepEqual(p.tracks[0].clips.map((c) => c.motion.kind), ["zoom-in", "none", "zoom-in"]);
+  const q = T.normalize({ tracks: [{ id: "v1", clips: [{ id: "x", start: 0, duration: 1 }] }] });
+  assert.deepEqual(q.tracks[0].clips[0].motion, { kind: "none", amount: 0.15 });
+  T.updateClip(q, "x", { motion: { kind: "pan-left" } });
+  assert.deepEqual(q.tracks[0].clips[0].motion, { kind: "pan-left", amount: 0.15 });
+});

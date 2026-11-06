@@ -16,6 +16,13 @@ test("pembagian halaman caption sama dengan Rust", () => {
   }
 });
 
+test("gerak Ken Burns sama dengan Rust", () => {
+  for (const c of fixture.motion) {
+    const got = geometry.motionAt({ kind: c.kind, amount: c.amount }, c.u);
+    got.forEach((v, i) => assert.ok(Math.abs(v - c.out[i]) < 1e-9, `${JSON.stringify(c)} -> ${got}`));
+  }
+});
+
 test("penempatan klip sama dengan Rust", () => {
   for (const c of fixture.placement) {
     const [x, y, scale, rotation, opacity] = c.t;

@@ -8,7 +8,7 @@
 
 use crate::ass;
 use crate::layout::{place, Placement};
-use crate::model::{AssetKind, ClipKind, Project, TrackKind};
+use crate::model::{AssetKind, ClipKind, Motion, Project, TrackKind};
 use serde::{Deserialize, Serialize};
 
 pub const FILTER_FILE: &str = "cutkit-filter.txt";
@@ -52,6 +52,7 @@ pub struct ExportPlan {
 struct Visual {
     input: usize,
     speed: f64,
+    motion: Option<(Motion, u64)>,
     start: f64,
     end: f64,
     place: Placement,
@@ -159,7 +160,8 @@ pub fn build_plan(project: &Project, opts: &ExportOptions) -> Result<ExportPlan,
             }
             if want_video {
                 let pl = place(w, h, asset.width, asset.height, clip.fit, &clip.transform);
-                visuals.push(Visual { input, speed: clip.effective_speed(), start: clip.start, end: clip.end(), place: pl, opacity: clip.transform.opacity.clamp(0.0, 1.0) });
+                let motion = clip.motion.is_active().then(|| (clip.motion.clone(), (clip.source_duration() * fps).round().max(1.0) as u64));
+                visuals.push(Visual { input, speed: clip.effective_speed(), motion, start: clip.start, end: clip.end(), place: pl, opacity: clip.transform.opacity.clamp(0.0, 1.0) });
             }
             if want_audio {
                 audios.push(AudioSrc {
@@ -179,7 +181,25 @@ pub fn build_plan(project: &Project, opts: &ExportOptions) -> Result<ExportPlan,
     g.push("[0:v]format=rgba[b0]".into());
     for (i, v) in visuals.iter().enumerate() {
         let p = &v.place;
-        let mut chain = format!("[{}:v]format=rgba,scale={}:{}", v.input, p.w, p.h);
+        let mut chain = match &v.motion {
+            // Diperbesar 2x dulu supaya pembulatan posisi zoompan tidak membuat gambar bergetar.
+            Some((m, frames)) => {
+                let (z, x, y) = m.zoompan_exprs(*frames);
+                // Faktor dibatasi agar sisi terpanjang <= 4096 px (klip besar tetap ringan di laptop).
+                let k = (4096.0 / p.w.max(p.h) as f64).clamp(1.0, 2.0);
+                format!(
+                    "[{}:v]format=rgba,fps={},scale={}:{},zoompan=z='{z}':x='{x}':y='{y}':d=1:s={}x{}:fps={}",
+                    v.input,
+                    f(fps),
+                    (p.w as f64 * k).round() as u32,
+                    (p.h as f64 * k).round() as u32,
+                    p.w,
+                    p.h,
+                    f(fps)
+                )
+            }
+            None => format!("[{}:v]format=rgba,scale={}:{}", v.input, p.w, p.h),
+        };
         if p.radians.abs() > 1e-9 {
             chain.push_str(&format!(",rotate={}:ow={}:oh={}:c=0x00000000", f(p.radians), p.ow, p.oh));
         }
@@ -370,6 +390,19 @@ mod tests {
         // gambar tidak terpengaruh speed
         p.tracks[1].clips[0].speed = 3.0;
         assert!(build_plan(&p, &opts()).unwrap().args.join(" ").contains("-loop 1 -framerate 30 -t 2 -i C:/meme/x.png"));
+    }
+
+    #[test]
+    fn motion_uses_upscaled_zoompan() {
+        let mut p = project();
+        p.tracks[1].clips[0].motion = Motion { kind: "zoom-in".into(), amount: 0.2 };
+        p.tracks[0].clips[0].motion = Motion { kind: "pan-left".into(), amount: 0.1 };
+        let g = build_plan(&p, &opts()).unwrap().filter_script;
+        // gambar 2 detik @30 fps = 60 frame
+        assert!(g.contains("[3:v]format=rgba,fps=30,scale=864:692,zoompan=z='1+0.2*min(on/59,1)':x='(iw-iw/zoom)*0.5':y='(ih-ih/zoom)*0.5':d=1:s=432x346:fps=30,rotate="), "{g}");
+        assert!(g.contains("[2:v]format=rgba,fps=30,scale=4096:2304,zoompan=z='1+0.1':x='(iw-iw/zoom)*(1-min(on/119,1))':y='(ih-ih/zoom)*0.5':d=1:s=3413x1920:fps=30,setpts"), "{g}");
+        p.tracks[0].clips[0].motion.kind = "none".into();
+        assert!(!build_plan(&p, &opts()).unwrap().filter_script.contains("[2:v]format=rgba,fps"));
     }
 
     #[test]
