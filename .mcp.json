@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "cutkit": {
+      "command": "node",
+      "args": ["mcp/server.js"]
+    }
+  }
+}

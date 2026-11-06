@@ -10,7 +10,9 @@
     "test": "node --test tests/ && cargo test -p cutkit-core",
     "test:js": "node --test tests/",
     "icon": "tauri icon src-tauri/icons/icon.svg -o src-tauri/icons",
-    "test:ai": "cargo test -p cutkit-core --test ai_real -- --ignored --nocapture"
+    "test:ai": "cargo test -p cutkit-core --test ai_real -- --ignored --nocapture",
+    "build:cli": "cargo build --release -p cutkit-cli",
+    "mcp": "node mcp/server.js"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

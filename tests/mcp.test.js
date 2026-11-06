@@ -1,0 +1,97 @@
+"use strict";
+// Tes server MCP lewat stdio seperti klien MCP sungguhan.
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const { spawn, execFileSync } = require("node:child_process");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+
+const ROOT = path.join(__dirname, "..");
+const CLI = path.join(ROOT, "target", "release", process.platform === "win32" ? "cutkit-cli.exe" : "cutkit-cli");
+
+function client() {
+  const child = spawn(process.execPath, [path.join(ROOT, "mcp", "server.js")], { stdio: ["pipe", "pipe", "inherit"] });
+  let buf = "";
+  const waiting = new Map();
+  const notes = [];
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (d) => {
+    buf += d;
+    let i;
+    while ((i = buf.indexOf("\n")) >= 0) {
+      const msg = JSON.parse(buf.slice(0, i));
+      buf = buf.slice(i + 1);
+      if (msg.id != null && waiting.has(msg.id)) { waiting.get(msg.id)(msg); waiting.delete(msg.id); } else notes.push(msg);
+    }
+  });
+  let next = 1;
+  const request = (method, params) => new Promise((resolve) => {
+    const id = next++;
+    waiting.set(id, resolve);
+    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+  });
+  const call = async (name, args, meta) => {
+    const r = await request("tools/call", { name, arguments: args, ...(meta ? { _meta: meta } : {}) });
+    const text = r.result.content[0].text;
+    if (r.result.isError) throw new Error(text);
+    return JSON.parse(text);
+  };
+  return { request, call, notes, close: () => child.stdin.end() };
+}
+
+test("MCP: initialize, tools/list, dan edit proyek tanpa ffmpeg", async () => {
+  const c = client();
+  const init = await c.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "tes", version: "1" } });
+  assert.equal(init.result.serverInfo.name, "cutkit");
+  assert.ok(init.result.capabilities.tools);
+  const list = await c.request("tools/list", {});
+  const names = list.result.tools.map((t) => t.name);
+  for (const n of ["cutkit_new_project", "cutkit_quick_video", "cutkit_captions_from_audio", "cutkit_tts", "cutkit_export", "cutkit_remove_background", "cutkit_apply_template"]) assert.ok(names.includes(n), n);
+  assert.ok(list.result.tools.every((t) => t.inputSchema && t.inputSchema.type === "object"));
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cutkit-mcp-"));
+  const proj = path.join(dir, "uji.cutkit.json");
+  const s = await c.call("cutkit_new_project", { project: proj, name: "Uji MCP", ratio: "16:9" });
+  assert.deepEqual([s.canvas.width, s.canvas.height], [1920, 1080]);
+  const txt = await c.call("cutkit_add_text", { project: proj, text: "Halo", start: 1, duration: 2 });
+  const fx = await c.call("cutkit_add_effect", { project: proj, kind: "flash", start: 0, duration: 0.5 });
+  await c.call("cutkit_set_captions", { project: proj, text: "satu dua tiga", start: 0, end: 3, style: "youtube" });
+  const sum = await c.call("cutkit_project_summary", { project: proj });
+  const clips = sum.tracks.flatMap((t) => t.clips);
+  assert.ok(clips.some((x) => x.id === txt.clip_id && x.text === "Halo"));
+  assert.ok(clips.some((x) => x.id === fx.clip_id && x.effect === "flash"));
+  assert.equal(sum.captions.words, 3);
+  assert.equal(sum.captions.style.words_per_page, 8);
+  await c.call("cutkit_edit_clip", { project: proj, clip_id: txt.clip_id, set: { start: 2, transform: { y: -200 } } });
+  const after = (await c.call("cutkit_project_summary", { project: proj })).tracks.flatMap((t) => t.clips).find((x) => x.id === txt.clip_id);
+  assert.equal(after.start, 2);
+  const bad = await c.request("tools/call", { name: "cutkit_edit_clip", arguments: { project: proj, clip_id: "tidak-ada", set: {} } });
+  assert.ok(bad.result.isError);
+  const templates = await c.call("cutkit_list_templates", {});
+  assert.ok(templates.some((t) => t.name === "Fakta Shorts" && t.slots.length === 3));
+  c.close();
+});
+
+test("MCP: video cepat lalu ekspor sungguhan (butuh cutkit-cli dan ffmpeg)", { skip: !fs.existsSync(CLI) && "cutkit-cli belum dibuild" }, async () => {
+  let ffmpeg;
+  try { ffmpeg = execFileSync(process.platform === "win32" ? "where" : "which", ["ffmpeg"], { encoding: "utf8" }).split(/\r?\n/)[0].trim(); } catch { return; }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cutkit-mcp-ekspor-"));
+  const img = (name, color) => { const f = path.join(dir, name); execFileSync(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", `color=c=${color}:s=360x640:d=1`, "-frames:v", "1", "-update", "1", f]); return f; };
+  const a = img("01.png", "red"), b = img("02.png", "blue");
+  const vo = path.join(dir, "vo.wav");
+  execFileSync(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=f=300:d=3", vo]);
+  const c = client();
+  await c.request("initialize", { protocolVersion: "2025-06-18", capabilities: {} });
+  const proj = path.join(dir, "cepat.cutkit.json");
+  await c.call("cutkit_new_project", { project: proj, ratio: "9:16" });
+  const q = await c.call("cutkit_quick_video", { project: proj, voice: vo, visuals: [a, b], script: "ini video dari mcp" });
+  assert.ok(Math.abs(q.duration - 3) < 0.05);
+  assert.equal(q.captions.words, 4);
+  const out = path.join(dir, "hasil.mp4");
+  const ex = await c.call("cutkit_export", { project: proj, output: out, quality: "fast" }, { progressToken: "p1" });
+  assert.equal(ex.output, out);
+  assert.ok(fs.statSync(out).size > 1000);
+  assert.ok(c.notes.some((n) => n.method === "notifications/progress" && n.params.progressToken === "p1"), "ada notifikasi progres");
+  c.close();
+});

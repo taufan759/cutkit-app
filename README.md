@@ -109,6 +109,52 @@ Proyek diubah menjadi satu perintah ffmpeg (lihat `crates/cutkit-core/src/export
 
 Filter graph ditulis ke file (`-/filter_complex`) sehingga proyek panjang tidak terbentur batas panjang baris perintah Windows. Rumus penempatan klip dan pembagian halaman caption ada di Rust dan JS sekaligus; tes `parity` memastikan keduanya sama sehingga preview cocok dengan hasil ekspor.
 
+## MCP: pakai CutKit dari Claude
+
+CutKit punya server [MCP](https://modelcontextprotocol.io) (`mcp/server.js`), jadi Claude Code, Claude Desktop, atau klien MCP lain bisa menyusun dan mengekspor video lewat percakapan, misalnya *"buat Shorts dari folder ini, kasih caption kuning, ekspor ke Desktop"*. Proyek yang dibuat lewat MCP adalah file `.cutkit.json` biasa, jadi bisa dibuka dan dirapikan lagi di aplikasi.
+
+Server ini memakai modul timeline yang sama dengan aplikasi (`ui/core`) dan menjalankan pekerjaan berat lewat `cutkit-cli` (ffmpeg, Whisper, Piper, hapus background). Model AI dibaca dari folder model aplikasi, jadi model yang sudah diunduh di aplikasi langsung terpakai.
+
+| Tool | Fungsi |
+|---|---|
+| `cutkit_status` | Lokasi ffmpeg, folder model, model yang sudah terpasang |
+| `cutkit_new_project`, `cutkit_project_summary` | Buat proyek (9:16, 16:9, 4K, 1:1, ...) dan lihat isinya |
+| `cutkit_import_media`, `cutkit_add_clip`, `cutkit_edit_clip`, `cutkit_split_clip`, `cutkit_delete_clip` | Susun timeline: posisi, durasi, kecepatan, volume, fade, Ken Burns, latar blur, chroma, filter warna, transisi, keyframe |
+| `cutkit_add_text`, `cutkit_add_effect` | Teks judul dan efek (getar, kilat, glitch, ...) |
+| `cutkit_quick_video` | Susun otomatis dari voice over + gambar/klip + musik + caption, bisa ganti gambar di ketukan |
+| `cutkit_captions_from_audio`, `cutkit_set_captions` | Auto caption Whisper, atau dari `.srt`/JSON/teks, plus gaya (kuning, hijau, kotak, youtube) |
+| `cutkit_tts` | Naskah jadi suara Piper + caption |
+| `cutkit_detect_beats`, `cutkit_remove_background` | Ketukan musik dan hapus background tanpa green screen |
+| `cutkit_list_templates`, `cutkit_apply_template` | Proyek dari template |
+| `cutkit_export` | Ekspor MP4 dengan progres (notifikasi MCP) |
+| `cutkit_download_model` | Unduh model AI |
+
+Pasang (sekali):
+
+```bash
+cargo build --release -p cutkit-cli
+```
+
+Claude Code membaca `.mcp.json` di folder repo ini secara otomatis saat dibuka di sini. Untuk semua folder, tambahkan ke `~/.claude.json` (atau `claude_desktop_config.json` untuk Claude Desktop):
+
+```json
+{
+  "mcpServers": {
+    "cutkit": { "command": "node", "args": ["D:/Proyek Programming/cutkit-app/mcp/server.js"] }
+  }
+}
+```
+
+`cutkit-cli` juga bisa dipakai langsung dari terminal, hasilnya JSON:
+
+```bash
+target/release/cutkit-cli info
+```
+
+```bash
+target/release/cutkit-cli export "D:\Proyek\Shorts.cutkit.json" "D:\hasil.mp4" --quality fast --loudnorm
+```
+
 ## Model AI dan tempat penyimpanannya
 
 Semua model diunduh dari sumber resmi lewat HTTPS dan dicek ukuran serta SHA-256-nya sebelum dipakai. Folder model bisa diganti di **Proyek → Cek sistem & ffmpeg** (di laptop pemilik: `D:\DevTools\cutkit-models`).
@@ -151,6 +197,8 @@ ui/                   HTML, CSS, JS polos
   timeline-view.js    Timeline: klip, geser, pangkas, snap, zoom
   app.js              Panel, inspector, impor, ekspor, pintasan
 tests/                Tes Node untuk logika UI + fixture parity bersama Rust
+crates/cutkit-cli/    cutkit-cli: probe, ekspor, transkripsi, TTS, ketukan, hapus background dalam JSON
+mcp/server.js         Server MCP (stdio, tanpa dependensi)
 tests/harness/        Server pengembangan untuk menguji UI di browser biasa dengan mock Tauri
 ```
 
@@ -190,6 +238,7 @@ node tests/harness/server.js 5187
 - `tests/parity.test.js` dan `crates/cutkit-core/tests/parity.rs`: fixture yang sama untuk penempatan klip dan halaman caption di JS dan Rust.
 - Tes unit Rust: model, probe (video HP diputar, GIF, MP3 bersampul), pembuat ASS, penyusun argumen ffmpeg (diperiksa tanpa menjalankan ffmpeg).
 - `crates/cutkit-core/tests/export_real.rs`: membuat klip sintetis dengan ffmpeg, mengekspor proyek berisi potongan, overlay berputar, SFX, teks, dan caption, lalu memeriksa hasilnya dengan ffprobe. Juga membuat semua media proyek contoh sungguhan, dan satu proyek berisi semua efek (kecepatan, latar blur, zoom, chroma key, caption pop, loudness) yang hasilnya diperiksa piksel per piksel dan diukur dengan ebur128. Dilewati bila ffmpeg tidak ada.
+- `tests/mcp.test.js`: menjalankan server MCP seperti klien sungguhan (initialize, tools/list, edit proyek), lalu menyusun video cepat dan mengekspornya lewat `cutkit-cli` (dilewati bila `cutkit-cli` belum dibuild).
 - `tests/timeline.test.js` juga menguji susun otomatis: pembagian durasi, potongan menempel ke awal kata, musik, dan caption.
 
 ## Lisensi
