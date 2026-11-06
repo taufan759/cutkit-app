@@ -185,3 +185,46 @@ test("normalize melengkapi proyek lama", () => {
   assert.equal(p.tracks[0].clips[0].volume, 1);
   assert.equal(p.captions.style.words_per_page, 3);
 });
+
+test("allocate: video pendek memakai durasi aslinya, sisanya dibagi rata", () => {
+  const d = T.allocate(12, [{ kind: "image" }, { kind: "video", duration: 2 }, { kind: "image" }]);
+  assert.deepEqual(d, [5, 2, 5]);
+  assert.deepEqual(T.allocate(9, [{ kind: "image" }, { kind: "image" }, { kind: "image" }]), [3, 3, 3]);
+  assert.deepEqual(T.allocate(4, [{ kind: "video", duration: 1 }, { kind: "video", duration: 1 }]), [1, 1]);
+});
+
+test("snapCuts menempel potongan ke awal kata terdekat", () => {
+  const words = [{ start: 0 }, { start: 2.8 }, { start: 6.1 }];
+  assert.deepEqual(T.snapCuts([3, 6, 9], words), [2.8, 6.1, 9]);
+  assert.deepEqual(T.snapCuts([3], null), [3]);
+});
+
+test("autoAssemble: voice over + gambar + musik + caption", () => {
+  const p = T.newProject();
+  const voice = { id: "vo", kind: "audio", duration: 9, has_audio: true };
+  const music = { id: "mu", kind: "audio", duration: 60, has_audio: true };
+  const imgs = ["a", "b", "c"].map((id) => ({ id, kind: "image", width: 1000, height: 1000 }));
+  const words = [{ text: "satu", start: 0, end: 1 }, { text: "dua", start: 3.2, end: 4 }, { text: "tiga", start: 5.8, end: 9 }];
+  p.tracks[0].clips.push(T.normalizeClip({ id: "old", start: 0, duration: 1 }));
+  const total = T.autoAssemble(p, { voice, visuals: imgs, music, words });
+  assert.equal(total, 9);
+  assert.deepEqual(p.tracks[0].clips.map((c) => [c.asset_id, c.start, c.duration]), [["a", 0, 3.2], ["b", 3.2, 2.6], ["c", 5.8, 3.2]]);
+  assert.ok(p.tracks[0].clips.every((c) => c.fit === "cover"));
+  const audio = p.tracks.filter((t) => t.kind === "audio");
+  assert.equal(audio.length, 2, "track musik dibuat");
+  assert.deepEqual(audio[0].clips.map((c) => [c.asset_id, c.kind, c.duration]), [["vo", "audio", 9]]);
+  assert.equal(audio[1].clips[0].volume, 0.15);
+  assert.equal(audio[1].clips[0].duration, 9, "musik dipotong sepanjang voice over");
+  assert.ok(audio[1].clips[0].fade_out > 0);
+  assert.ok(p.captions.enabled);
+  assert.equal(p.captions.words.length, 3);
+  assert.equal(T.duration(p), 9);
+});
+
+test("autoAssemble tanpa voice: durasi dari gambar dan video", () => {
+  const p = T.newProject();
+  const total = T.autoAssemble(p, { visuals: [{ id: "i", kind: "image", width: 10, height: 10 }, { id: "v", kind: "video", duration: 4, width: 10, height: 10, has_audio: true }] });
+  assert.equal(total, 7);
+  assert.deepEqual(p.tracks[0].clips.map((c) => [c.start, c.duration]), [[0, 3], [3, 4]]);
+  assert.throws(() => T.autoAssemble(p, {}), /minimal/);
+});

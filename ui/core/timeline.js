@@ -478,7 +478,111 @@
     clear() { this.undoStack.length = 0; this.redoStack.length = 0; }
   }
 
+  /**
+   * Membagi durasi `total` ke daftar visual. Video yang lebih pendek dari jatahnya
+   * memakai durasi aslinya, sisanya dibagi rata ke yang lain. Mengembalikan durasi per visual.
+   */
+  function allocate(total, visuals) {
+    const n = visuals.length;
+    const out = new Array(n).fill(null);
+    let free = visuals.map((_, i) => i);
+    let remaining = total;
+    for (;;) {
+      const slot = remaining / free.length;
+      const fixed = free.filter((i) => visuals[i].kind === "video" && visuals[i].duration > 0 && visuals[i].duration < slot);
+      if (!fixed.length) {
+        for (const i of free) out[i] = slot;
+        return out;
+      }
+      for (const i of fixed) { out[i] = visuals[i].duration; remaining -= visuals[i].duration; }
+      free = free.filter((i) => !fixed.includes(i));
+      if (!free.length) return out;
+    }
+  }
+
+  /** Titik potong digeser ke awal kata terdekat (maks `reach` detik) agar pergantian gambar pas dengan ucapan. */
+  function snapCuts(cuts, words, reach = 0.6) {
+    if (!words || !words.length) return cuts;
+    const starts = words.map((w) => w.start).sort((a, b) => a - b);
+    return cuts.map((c) => {
+      let best = c;
+      let d = reach;
+      for (const s of starts) {
+        const dd = Math.abs(s - c);
+        if (dd < d) { d = dd; best = s; }
+      }
+      return best;
+    });
+  }
+
+  /**
+   * Menyusun timeline otomatis ala "voice over + gambar":
+   *  - voice (aset audio, opsional) di track audio pertama
+   *  - visuals (gambar/video) berurutan di track utama, dibagi sepanjang durasi voice,
+   *    titik potong ditempel ke awal kata caption bila ada
+   *  - music (opsional) di track audio kedua dengan volume pelan dan fade out
+   *  - words (opsional) jadi caption
+   * Isi timeline lama dihapus. Mengembalikan durasi total.
+   */
+  function autoAssemble(p, { voice = null, visuals = [], music = null, words = null, musicVolume = 0.15, fit = "cover" } = {}) {
+    if (!visuals.length && !voice) throw new Error("Pilih minimal satu voice over atau gambar/video.");
+    for (const t of p.tracks) t.clips = [];
+    const wordsEnd = words && words.length ? Math.max(...words.map((w) => w.end)) : 0;
+    const natural = visuals.map((v) => (v.kind === "video" && v.duration > 0 ? v.duration : STILL_DURATION));
+    const naturalTotal = natural.reduce((s, d) => s + d, 0);
+    let total = voice ? voice.duration : Math.max(naturalTotal, wordsEnd);
+    total = round(total);
+    if (!(total > 0)) throw new Error("Durasi voice over tidak terbaca.");
+
+    if (visuals.length) {
+      // Tanpa voice over (dan caption tidak lebih panjang), tiap visual memakai durasi aslinya.
+      const durs = !voice && total <= naturalTotal + 1e-6 ? natural : allocate(total, visuals);
+      const ends = [];
+      let t = 0;
+      for (let i = 0; i < durs.length - 1; i++) { t += durs[i]; ends.push(t); }
+      const cuts = snapCuts(ends, words);
+      // Potongan harus tetap naik dan tiap klip minimal MIN_DURATION.
+      for (let i = 0; i < cuts.length; i++) {
+        const lo = (i ? cuts[i - 1] : 0) + MIN_DURATION;
+        cuts[i] = Math.max(cuts[i], lo);
+      }
+      const bounds = [0, ...cuts, total];
+      visuals.forEach((asset, i) => {
+        const clip = clipFromAsset(asset, { fit });
+        clip.start = round(bounds[i]);
+        let dur = round(bounds[i + 1] - bounds[i]);
+        if (asset.kind === "video" && asset.duration > 0) dur = Math.min(dur, asset.duration);
+        clip.duration = Math.max(MIN_DURATION, dur);
+        p.tracks[0].clips.push(clip);
+      });
+      sortClips(p.tracks[0]);
+    }
+
+    const audioTracks = () => p.tracks.filter((tr) => tr.kind === "audio");
+    if (voice) {
+      const c = clipFromAsset(voice, { audioOnly: true });
+      c.duration = round(Math.min(voice.duration, total));
+      audioTracks()[0].clips.push(c);
+    }
+    if (music) {
+      let tr = audioTracks()[voice ? 1 : 0];
+      if (!tr) tr = addTrack(p, "audio");
+      const c = clipFromAsset(music, { audioOnly: true });
+      c.duration = round(Math.min(music.duration || total, total));
+      c.volume = voice ? musicVolume : 1;
+      c.fade_out = Math.min(1.5, c.duration / 3);
+      tr.clips.push(c);
+      tr.name = "Musik";
+    }
+    if (words && words.length) {
+      p.captions.words = words.map((w) => ({ text: w.text, start: w.start, end: w.end }));
+      p.captions.enabled = true;
+    }
+    return total;
+  }
+
   return {
+    allocate, snapCuts, autoAssemble,
     MIN_DURATION, STILL_DURATION, RATIOS,
     uid, newProject, normalize, normalizeClip, defaultTextStyle, defaultCaptionStyle, defaultTransform,
     clipEnd, duration, getTrack, getAsset, findClip, trackAccepts, overlaps, findFreeStart,
