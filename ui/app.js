@@ -816,6 +816,28 @@ function applyCaptionPreset(p, preset) {
   Object.assign(p.captions.style, st);
 }
 
+/* ---------- pustaka efek ---------- */
+
+function addEffect(kind) {
+  commit((p) => {
+    const t = TL.effectTrack(p);
+    const clip = TL.effectClip(kind, { duration: kind === "flash" ? 0.4 : kind === "punch" ? 0.6 : 1.5 });
+    TL.insertClip(p, t.id, clip, preview.time);
+    state.selected = clip.id;
+  });
+}
+
+function renderFxPanel() {
+  const panel = $("#fx-panel");
+  const sections = [
+    el("h4", { class: "panel-h" }, "Efek video"),
+    el("p", { class: "hint" }, "Klik untuk menambah efek di posisi playhead. Efek berlaku pada semua lapisan di bawahnya selama klip efek; panjangkan atau pindahkan klipnya di track Efek."),
+    el("div", { class: "fx-grid" }, TL.EFFECTS.map(([k, label]) => el("button", { class: "btn", onclick: () => addEffect(k) }, label))),
+  ];
+  if (window.renderStickerSection) sections.push(...window.renderStickerSection());
+  panel.replaceChildren(...sections);
+}
+
 /* ---------- ketukan musik ---------- */
 
 async function detectBeats(asset) {
@@ -1261,6 +1283,23 @@ function renderInspector() {
     return;
   }
   const c = f.clip;
+  if (c.kind === "effect") {
+    const upd2 = (patch) => { if (TL.findClip(state.project, c.id)) Object.assign(TL.findClip(state.project, c.id).clip.effect, patch); };
+    box.replaceChildren(el("div", { class: "insp" },
+      el("h3", {}, "Efek"),
+      el("div", { class: "sub" }, "Berlaku pada semua lapisan di bawahnya."),
+      el("section", {},
+        el("div", { class: "fx-grid" }, TL.EFFECTS.map(([k, label]) => el("button", {
+          class: "btn small" + (c.effect.kind === k ? " primary" : ""),
+          onclick: () => commit((pp) => { TL.findClip(pp, c.id).clip.effect.kind = k; }),
+        }, label))),
+        slider("Kekuatan", c.effect.intensity, { min: 0, max: 100, unit: "%", fromModel: (v) => v * 100, toModel: (v) => v / 100, apply: (v) => upd2({ intensity: v }) }),
+        field("Durasi", el("div", { class: "ctl" }, el("input", { type: "number", min: 0.1, step: 0.1, value: c.duration.toFixed(2), onchange: (e) => commit((pp) => TL.setDuration(pp, c.id, +e.target.value)) }), el("span", { class: "unit" }, "s"))),
+        el("div", { class: "btn-row" },
+          el("button", { class: "btn small", onclick: duplicate }, "Duplikat"),
+          el("button", { class: "btn small danger", onclick: () => deleteSelected(false) }, "Hapus")))));
+    return;
+  }
   const asset = c.asset_id ? TL.getAsset(p, c.asset_id) : null;
   const upd = (patch) => { const live = TL.findClip(state.project, c.id); if (live) TL.updateClip(state.project, c.id, patch); };
   const title = c.kind === "text" ? "Teks" : c.kind === "image" ? "Gambar" : c.kind === "audio" ? "Audio" : "Video";
@@ -2011,6 +2050,7 @@ function switchTab(tab) {
   document.querySelectorAll(".panel.left .tab-body").forEach((s) => s.classList.toggle("hidden", s.dataset.tab !== tab));
   if (tab === "captions") renderCaptionsPanel();
   if (tab === "voice") renderVoicePanel();
+  if (tab === "fx") renderFxPanel();
   if (tab === "library" && !state.lib.dir) {
     let last = null;
     try { last = JSON.parse(localStorage.getItem("cutkit.libdir") || "null"); } catch { /* */ }

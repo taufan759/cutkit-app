@@ -125,6 +125,7 @@
     c.chroma = Object.assign({ enabled: false, color: "#00ff00", similarity: 0.3, blend: 0.1 }, c.chroma || {});
     c.transition = Object.assign({ kind: "none", duration: 0.5 }, c.transition || {});
     c.color = Object.assign({ brightness: 1, contrast: 1, saturation: 1, hue: 0, temperature: 0, lut: "" }, c.color || {});
+    if (c.kind === "effect") c.effect = Object.assign({ kind: "shake", intensity: 0.5 }, c.effect || {});
     if (c.kind === "text") {
       c.text = c.text || { text: "", style: defaultTextStyle() };
       c.text.style = Object.assign(defaultTextStyle(), c.text.style || {});
@@ -303,6 +304,27 @@
       fit: opts.fit || "contain",
       transform: Object.assign(defaultTransform(), opts.transform || {}),
     });
+  }
+
+  /** Daftar efek: sama dengan EFFECTS di model.rs. */
+  const EFFECTS = [
+    ["shake", "Getar"], ["punch", "Zoom kejut"], ["flash", "Kilat"], ["bw", "Hitam putih"], ["vignette", "Vignette"],
+    ["blur", "Blur"], ["glitch", "Glitch RGB"], ["negate", "Negatif"], ["pixelate", "Sensor piksel"], ["letterbox", "Letterbox"],
+  ];
+
+  function effectClip(kind, opts = {}) {
+    return normalizeClip({ id: uid("e"), kind: "effect", asset_id: null, start: 0, duration: opts.duration || 1, effect: { kind, intensity: opts.intensity ?? 0.5 } });
+  }
+
+  /** Track efek (dibuat di atas semua track video bila belum ada). */
+  function effectTrack(p) {
+    let t = p.tracks.find((x) => x.kind === "video" && x.role === "effects");
+    if (!t) {
+      t = addTrack(p, "video");
+      t.name = "Efek";
+      t.role = "effects";
+    }
+    return t;
   }
 
   function textClip(text = "Teks judul", opts = {}) {
@@ -758,6 +780,7 @@
   }
 
   return {
+    EFFECTS, effectClip, effectTrack,
     allocate, snapCuts, autoAssemble, beatTimes, syncToBeats, setTransition, transitionActive, previousClip, TRANSITIONS, speedOf, sourceTime, setSpeed,
     MIN_DURATION, STILL_DURATION, RATIOS, RATIO_LABELS, styleScale,
     uid, newProject, normalize, normalizeClip, defaultTextStyle, defaultCaptionStyle, defaultTransform,

@@ -348,3 +348,37 @@ fn color_adjust_and_lut_render() {
     assert!((gray[0] as i32 - gray[1] as i32).abs() < 12 && (gray[0] as i32 - 54).abs() < 16, "abu-abu: {gray:?}");
     assert!(cyan[0] < 50 && cyan[1] > 200 && cyan[2] > 200, "cyan: {cyan:?}");
 }
+
+#[test]
+fn every_effect_renders() {
+    let Some(tools) = find_tools(None) else {
+        eprintln!("ffmpeg tidak ditemukan, tes efek video dilewati");
+        return;
+    };
+    let dir = tmp_dir("efek-video");
+    let s = |p: &PathBuf| p.to_string_lossy().to_string();
+    let img = dir.join("merah.png");
+    run(&tools.ffmpeg, &["-hide_banner", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=0xff2000:s=160x90:d=1", "-frames:v", "1", "-update", "1", &s(&img)].map(String::from)).unwrap();
+    let mut p = Project::new("efek video");
+    p.canvas = Canvas { width: 160, height: 90, fps: 30.0, background: "#000000".into() };
+    p.assets.push(Asset { id: "i".into(), path: s(&img), kind: AssetKind::Image, width: 160, height: 90, has_video: true, ..Default::default() });
+    let n = cutkit_core::model::EFFECTS.len();
+    // Satu detik terakhir tanpa efek untuk memastikan efek tidak bocor.
+    p.tracks[0].clips.push(Clip { id: "bg".into(), kind: ClipKind::Image, asset_id: Some("i".into()), start: 0.0, duration: n as f64 + 1.0, ..Default::default() });
+    for (i, k) in cutkit_core::model::EFFECTS.iter().enumerate() {
+        p.tracks[1].clips.push(Clip { id: format!("e{i}"), kind: ClipKind::Effect, start: i as f64, duration: 1.0, effect: Some(Effect { kind: k.to_string(), intensity: 0.6 }), ..Default::default() });
+    }
+    let out = dir.join("efek.mp4");
+    let plan = build_plan(&p, &ExportOptions { output: s(&out), quality: Quality::Fast, ..Default::default() }).unwrap();
+    run_export(&tools.ffmpeg, &dir.join("kerja"), &plan, Arc::new(AtomicBool::new(false)), |_| {}).expect("semua efek valid di ffmpeg");
+    let o = s(&out);
+    let at = |name: &str| cutkit_core::model::EFFECTS.iter().position(|k| *k == name).unwrap() as f64 + 0.5;
+    let bw = pixel(&tools.ffmpeg, &o, at("bw"), 80, 45);
+    assert!((bw[0] as i32 - bw[2] as i32).abs() < 15, "hitam putih: {bw:?}");
+    let neg = pixel(&tools.ffmpeg, &o, at("negate"), 80, 45);
+    assert!(neg[0] < 60 && neg[2] > 180, "negatif dari merah = cyan: {neg:?}");
+    let bar = pixel(&tools.ffmpeg, &o, at("letterbox"), 80, 2);
+    assert!(bar.iter().all(|&c| c < 30), "letterbox hitam di atas: {bar:?}");
+    let plain = pixel(&tools.ffmpeg, &o, n as f64 + 0.5, 80, 45);
+    assert!(plain[0] > 200, "efek tidak bocor di luar waktunya: {plain:?}");
+}

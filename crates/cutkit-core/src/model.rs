@@ -85,6 +85,8 @@ pub enum ClipKind {
     Image,
     Audio,
     Text,
+    /// Efek video yang berlaku pada semua lapisan di bawahnya selama rentang klip.
+    Effect,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -126,6 +128,8 @@ pub struct Clip {
     pub transition: Transition,
     /// Penyesuaian warna dan LUT.
     pub color: crate::color::ColorAdjust,
+    /// Hanya untuk klip efek.
+    pub effect: Option<Effect>,
     pub text: Option<TextClip>,
     /// Hanya saat ekspor bertahap: detik sejak awal klip asli (klip terpotong di batas bagian).
     #[serde(skip)]
@@ -156,6 +160,7 @@ impl Default for Clip {
             chroma: Chroma::default(),
             transition: Transition::default(),
             color: crate::color::ColorAdjust::default(),
+            effect: None,
             text: None,
             offset: 0.0,
             span: 0.0,
@@ -198,6 +203,76 @@ pub struct Transform {
 impl Default for Transform {
     fn default() -> Self {
         Transform { x: 0.0, y: 0.0, scale: 1.0, rotation: 0.0, opacity: 1.0 }
+    }
+}
+
+/// Efek video: shake, punch, flash, bw, vignette, blur, glitch, negate, pixelate, letterbox.
+/// `intensity` 0..1 (0.5 = sedang).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct Effect {
+    pub kind: String,
+    pub intensity: f64,
+}
+
+impl Default for Effect {
+    fn default() -> Self {
+        Effect { kind: "shake".into(), intensity: 0.5 }
+    }
+}
+
+pub const EFFECTS: &[&str] = &["shake", "punch", "flash", "bw", "vignette", "blur", "glitch", "negate", "pixelate", "letterbox"];
+
+impl Effect {
+    /// Filter ffmpeg yang diterapkan ke komposisi `input` selama [start, end), keluaran `output`.
+    /// Bisa lebih dari satu baris filter graph (efek yang memakai salinan bingkai).
+    pub fn filter_lines(&self, input: &str, output: &str, tag: &str, start: f64, end: f64, w: u32, h: u32) -> Vec<String> {
+        let k = self.intensity.clamp(0.0, 1.0);
+        let en = format!("enable='between(t,{},{})'", fmt_num(start), fmt_num(end));
+        let d = (end - start).max(0.01);
+        match self.kind.as_str() {
+            "shake" => {
+                // Salinan bingkai diperbesar lalu digeser bergetar di atas aslinya: tanpa pinggiran kosong.
+                let z = 1.0 + 0.06 * (0.5 + k);
+                let (zw, zh) = (((w as f64 * z) / 2.0).round() as u32 * 2, ((h as f64 * z) / 2.0).round() as u32 * 2);
+                let (mx, my) = ((zw - w) / 2, (zh - h) / 2);
+                let ax = (mx as f64 * 0.8).round();
+                let ay = (my as f64 * 0.8).round();
+                vec![
+                    format!("{input}split=2[{tag}a][{tag}b]"),
+                    format!("[{tag}b]scale={zw}:{zh}[{tag}c]"),
+                    format!("[{tag}a][{tag}c]overlay=x='-{mx}+{ax}*sin(t*53)':y='-{my}+{ay}*cos(t*41)':{en}{output}"),
+                ]
+            }
+            "punch" => {
+                let z = 1.0 + 0.3 * k;
+                let (zw, zh) = (((w as f64 * z) / 2.0).round() as u32 * 2, ((h as f64 * z) / 2.0).round() as u32 * 2);
+                vec![
+                    format!("{input}split=2[{tag}a][{tag}b]"),
+                    format!("[{tag}b]scale={zw}:{zh}[{tag}c]"),
+                    format!("[{tag}a][{tag}c]overlay=x=-{}:y=-{}:{en}{output}", (zw - w) / 2, (zh - h) / 2),
+                ]
+            }
+            // Kilat: kecerahan naik lalu turun linear sepanjang klip efek.
+            "flash" => vec![format!("{input}eq=brightness='{}*(1-min(1,(t-{})/{}))':eval=frame:{en}{output}", fmt_num(0.4 + 0.6 * k), fmt_num(start), fmt_num(d))],
+            "bw" => vec![format!("{input}hue=s=0:{en}{output}")],
+            "vignette" => vec![format!("{input}vignette=angle={}:{en}{output}", fmt_num(0.3 + 0.5 * k))],
+            "blur" => vec![format!("{input}gblur=sigma={}:{en}{output}", fmt_num(2.0 + 18.0 * k))],
+            "glitch" => {
+                let s = (4.0 + 16.0 * k).round() as i32;
+                vec![format!("{input}rgbashift=rh=-{s}:bh={s}:gv={}:{en}{output}", s / 3)]
+            }
+            "negate" => vec![format!("{input}negate={en}{output}")],
+            "pixelate" => {
+                let px = (6.0 + 34.0 * k).round() as u32;
+                vec![format!("{input}pixelize=w={px}:h={px}:{en}{output}")]
+            }
+            "letterbox" => {
+                let bar = ((h as f64) * (0.08 + 0.1 * k)).round() as u32;
+                vec![format!("{input}drawbox=x=0:y=0:w=iw:h={bar}:color=black:t=fill:{en},drawbox=x=0:y=ih-{bar}:w=iw:h={bar}:color=black:t=fill:{en}{output}")]
+            }
+            _ => vec![format!("{input}null{output}")],
+        }
     }
 }
 

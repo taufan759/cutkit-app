@@ -375,3 +375,18 @@ test("warna: default netral, updateClip menggabungkan nilai", () => {
   assert.equal(p.tracks[0].clips[0].color.saturation, 0);
   assert.equal(p.tracks[0].clips[0].color.contrast, 1);
 });
+
+test("efek: klip efek di track Efek paling atas, tidak menerima transisi", () => {
+  const { p } = setup();
+  const t = T.effectTrack(p);
+  assert.equal(t.name, "Efek");
+  assert.equal(T.effectTrack(p), t, "track efek dipakai ulang");
+  const kinds = p.tracks.map((x) => x.kind);
+  assert.equal(kinds.lastIndexOf("video"), p.tracks.indexOf(t), "di atas semua track video");
+  const e = T.insertClip(p, t.id, T.effectClip("glitch"), 2);
+  assert.deepEqual([e.kind, e.start, e.duration, e.effect.kind, e.effect.intensity], ["effect", 2, 1, "glitch", 0.5]);
+  assert.throws(() => T.insertClip(p, "a1", T.effectClip("bw")), /audio/);
+  T.trimClip(p, e.id, "end", 5);
+  assert.equal(e.duration, 3, "efek bisa diperpanjang bebas");
+  assert.equal(T.EFFECTS.length, 10);
+});

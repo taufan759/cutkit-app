@@ -172,7 +172,8 @@
       const asset = clip.asset_id ? TL.getAsset(p, clip.asset_id) : null;
       const left = this.timeToX(clip.start);
       const width = Math.max(3, this.timeToX(clip.duration));
-      const name = clip.kind === "text" ? (clip.text && clip.text.text.split("\n")[0]) || "Teks" : asset ? asset.name : "(media hilang)";
+      const fxName = clip.kind === "effect" ? (TL.EFFECTS.find(([k]) => k === clip.effect.kind) || [0, "Efek"])[1] : null;
+      const name = clip.kind === "text" ? (clip.text && clip.text.text.split("\n")[0]) || "Teks" : fxName ? `✨ ${fxName}` : asset ? asset.name : "(media hilang)";
       const style = [`left:${left}px`, `width:${width}px`];
       const node = el("div", { class: `clip ${clip.kind}` + (selected ? " selected" : "") + (asset && asset.missing ? " missing" : "") + (clip.muted ? " muted" : ""), "data-id": clip.id });
       const bg = el("div", { class: "clip-bg" });

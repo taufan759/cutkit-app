@@ -139,6 +139,15 @@ fn overlay_xy(p: &Placement, w: u32, h: u32, t_in: &Option<(String, f64, f64)>, 
     (x, y)
 }
 
+/// Efek yang disisipkan ke rantai komposisi pada urutan lapisannya.
+struct FxStep {
+    /// Indeks visual sesudah efek ini diterapkan (efek berlaku untuk visual 0..after).
+    after: usize,
+    effect: crate::model::Effect,
+    start: f64,
+    end: f64,
+}
+
 struct AudioSrc {
     input: usize,
     speed: f64,
@@ -214,6 +223,7 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String, Ve
     let mut audios: Vec<AudioSrc> = vec![];
     let mut next_input = 2usize;
     let mut copies: Vec<(String, String)> = vec![];
+    let mut fx: Vec<FxStep> = vec![];
 
     for track in &project.tracks {
         let mut clips: Vec<_> = track.clips.iter().filter(|c| c.duration > 0.0).collect();
@@ -221,6 +231,14 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String, Ve
         for (ci, clip) in clips.iter().enumerate() {
             let clip = *clip;
             if clip.kind == ClipKind::Text {
+                continue;
+            }
+            if clip.kind == ClipKind::Effect {
+                if pass.video && !track.hidden && track.kind == TrackKind::Video {
+                    if let Some(e) = &clip.effect {
+                        fx.push(FxStep { after: visuals.len(), effect: e.clone(), start: clip.start, end: clip.end() });
+                    }
+                }
                 continue;
             }
             // Transisi masuk aktif bila klip ini menumpuk klip sebelumnya; klip berikutnya bisa mendorong klip ini keluar.
@@ -306,14 +324,32 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String, Ve
         g.push("[0:v]format=rgba[b0]".into());
         // Radius blur latar sebanding ukuran kanvas (40 px untuk 1080).
         let blur_radius = ((w.min(h) as f64) / 27.0).round().max(4.0) as u32;
+        let mut fx_iter = fx.iter().peekable();
+        let mut fx_n = 0usize;
+        // Label komposisi saat ini; tiap efek menghasilkan label baru (label filtergraph harus unik).
+        let mut cur = "[b0]".to_string();
+        // Efek yang berlaku sebelum visual ke-i (lapisan di bawahnya sudah tergambar di `cur`).
+        let mut apply_fx = |g: &mut Vec<String>, cur: &mut String, i: usize, fx_iter: &mut std::iter::Peekable<std::slice::Iter<FxStep>>| {
+            while let Some(e) = fx_iter.peek() {
+                if e.after != i {
+                    break;
+                }
+                let out = format!("[e{fx_n}]");
+                g.extend(e.effect.filter_lines(cur, &out, &format!("x{fx_n}"), e.start, e.end, w, h));
+                *cur = out;
+                fx_n += 1;
+                fx_iter.next();
+            }
+        };
         for (i, v) in visuals.iter().enumerate() {
+            apply_fx(&mut g, &mut cur, i, &mut fx_iter);
             let p = &v.place;
             let pts = if (v.speed - 1.0).abs() > 1e-6 {
                 format!("setpts=(PTS-STARTPTS)/{}+{}/TB", f(v.speed), f(v.start))
             } else {
                 format!("setpts=PTS-STARTPTS+{}/TB", f(v.start))
             };
-            let mut base = format!("[b{i}]");
+            let mut base = cur.clone();
             let mut src = format!("[{}:v]", v.input);
             if v.blur_bg {
                 g.push(format!("[{}:v]split=2[s{i}][q{i}]", v.input));
@@ -329,7 +365,7 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String, Ve
                     let last = g.pop().unwrap();
                     g.push(last.replace(&format!("[l{i}]"), &format!("{fade_bg}[l{i}]")));
                 }
-                g.push(format!("[b{i}][l{i}]overlay=x=0:y=0:format=rgb:eof_action=pass:enable='between(t,{},{})'[k{i}]", f(v.start), f(v.end)));
+                g.push(format!("{cur}[l{i}]overlay=x=0:y=0:format=rgb:eof_action=pass:enable='between(t,{},{})'[k{i}]", f(v.start), f(v.end)));
                 base = format!("[k{i}]");
                 src = format!("[s{i}]");
             }
@@ -379,8 +415,10 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String, Ve
                 f(v.end),
                 i + 1
             ));
+            cur = format!("[b{}]", i + 1);
         }
-        let last = format!("[b{}]", visuals.len());
+        apply_fx(&mut g, &mut cur, visuals.len(), &mut fx_iter);
+        let last = cur.clone();
         match &pass.ass {
             Some(_) => g.push(format!("{last}ass={},format=yuv420p[vout]", pass.ass_file)),
             None => g.push(format!("{last}format=yuv420p[vout]")),
@@ -551,6 +589,8 @@ pub fn window_project(project: &Project, t0: f64, t1: f64) -> Project {
         }
         let mut clips = vec![];
         for c in track.clips.iter().filter(|c| c.kind != ClipKind::Text && c.kind != ClipKind::Audio) {
+            // Efek yang terpotong di batas bagian tetap dimulai dari awal aslinya untuk kilat (flash).
+
             let s = c.start.max(t0);
             let e = c.end().min(t1);
             if e - s < 1e-6 {
@@ -915,6 +955,32 @@ mod tests {
         assert!(plan.filter_script.contains("scale=3413:1920,colorchannelmixer=rr=0.213:rg=0.715:rb=0.072:gr=0.213:gg=0.715:gb=0.072:br=0.213:bg=0.715:bb=0.072,lut3d=file=cutkit-lut-0.cube,setpts"), "{}", plan.filter_script);
         assert!(plan.filter_script.contains("scale=432:346,lut3d=file=cutkit-lut-0.cube,rotate="), "LUT yang sama disalin sekali");
         assert_eq!(plan.copies, vec![("cutkit-lut-0.cube".to_string(), "D:/LUT/film.cube".to_string())]);
+    }
+
+    #[test]
+    fn effects_apply_to_layers_below() {
+        let mut p = project();
+        let mut fx_track = Track { id: "fx".into(), kind: TrackKind::Video, name: "Efek".into(), ..Default::default() };
+        fx_track.clips.push(Clip { id: "e1".into(), kind: ClipKind::Effect, start: 1.0, duration: 1.0, effect: Some(Effect { kind: "bw".into(), intensity: 0.5 }), ..Default::default() });
+        fx_track.clips.push(Clip { id: "e2".into(), kind: ClipKind::Effect, start: 2.0, duration: 1.0, effect: Some(Effect { kind: "shake".into(), intensity: 0.5 }), ..Default::default() });
+        p.tracks.insert(2, fx_track); // di atas video dan overlay, di bawah audio
+        let g = build_plan(&p, &opts()).unwrap().filter_script;
+        // Efek diterapkan setelah dua lapisan visual ([b2]) dan sebelum format akhir.
+        assert!(g.contains("[b2]hue=s=0:enable='between(t,1,2)'[e0];"), "{g}");
+        // Getar: salinan 1,06x (1144x2036) digeser maks 80% dari selisih tepinya.
+        assert!(g.contains("[e0]split=2[x1a][x1b];\n[x1b]scale=1144:2036[x1c];\n[x1a][x1c]overlay=x='-32+26*sin(t*53)':y='-58+46*cos(t*41)':enable='between(t,2,3)'[e1];"), "{g}");
+        assert!(g.contains("[e1]format=yuv420p[vout]"), "{g}");
+        // Efek tidak membuka input apa pun.
+        assert_eq!(build_plan(&p, &opts()).unwrap().args.iter().filter(|a| *a == "-i").count(), 5);
+    }
+
+    #[test]
+    fn every_effect_has_a_filter() {
+        for k in crate::model::EFFECTS {
+            let lines = Effect { kind: k.to_string(), intensity: 0.5 }.filter_lines("[in]", "[out]", "t0", 1.0, 2.0, 1080, 1920);
+            assert!(lines.last().unwrap().ends_with("[out]"), "{k}: {lines:?}");
+            assert!(lines.iter().any(|l| l.contains("between(t,1,2)")), "{k} harus terbatas waktu");
+        }
     }
 
     #[test]

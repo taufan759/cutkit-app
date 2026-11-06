@@ -222,6 +222,9 @@ input[type=range] { accent-color: var(--accent); }
 .clip.image { background: var(--image); }
 .clip.audio { background: var(--audio); }
 .clip.text { background: var(--text-clip); }
+.clip.effect { background: linear-gradient(135deg, #7a2f8f, #b0418a); }
+.fx-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.fx-grid .btn { padding: 10px 6px; }
 .clip.missing { background: repeating-linear-gradient(45deg, #5a1d1d, #5a1d1d 8px, #3c1414 8px, #3c1414 16px); }
 .clip.selected { border: 2px solid #fff; box-shadow: 0 0 0 1px var(--accent); z-index: 2; }
 .clip-bg { position: absolute; inset: 0; opacity: .85; }

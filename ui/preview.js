@@ -165,6 +165,103 @@
     return String(text).split(/\r?\n/).map((l) => [{ text: l, active: false }]);
   }
 
+  /* ---------- efek video (rumus sama dengan Effect::filter_lines di model.rs) ---------- */
+
+  let fxCanvas = null;
+  function snapshotCanvas(src) {
+    fxCanvas = fxCanvas || document.createElement("canvas");
+    if (fxCanvas.width !== src.width || fxCanvas.height !== src.height) { fxCanvas.width = src.width; fxCanvas.height = src.height; }
+    const c = fxCanvas.getContext("2d");
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, src.width, src.height);
+    c.drawImage(src, 0, 0);
+    return fxCanvas;
+  }
+
+  function channelCopy(src, rgb) {
+    const c = document.createElement("canvas");
+    c.width = src.width; c.height = src.height;
+    const x = c.getContext("2d");
+    x.drawImage(src, 0, 0);
+    x.globalCompositeOperation = "multiply";
+    x.fillStyle = rgb;
+    x.fillRect(0, 0, c.width, c.height);
+    return c;
+  }
+
+  /** Menerapkan efek pada isi kanvas saat ini (lapisan di bawah efek). k = piksel kanvas per piksel proyek. */
+  function applyEffect(canvas, fx, t, start, end, k) {
+    const ctx = canvas.getContext("2d");
+    const W = canvas.width, H = canvas.height;
+    const s = Math.min(1, Math.max(0, fx.intensity));
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    switch (fx.kind) {
+      case "shake":
+      case "punch": {
+        const z = fx.kind === "shake" ? 1 + 0.06 * (0.5 + s) : 1 + 0.3 * s;
+        const zw = W * z, zh = H * z;
+        const mx = (zw - W) / 2, my = (zh - H) / 2;
+        const dx = fx.kind === "shake" ? -mx + mx * 0.8 * Math.sin(t * 53) : -mx;
+        const dy = fx.kind === "shake" ? -my + my * 0.8 * Math.cos(t * 41) : -my;
+        ctx.drawImage(snapshotCanvas(canvas), dx, dy, zw, zh);
+        break;
+      }
+      case "flash": {
+        const v = (0.4 + 0.6 * s) * (1 - Math.min(1, (t - start) / Math.max(0.01, end - start)));
+        ctx.globalCompositeOperation = "lighter";
+        ctx.fillStyle = `rgba(255,255,255,${Math.max(0, v)})`;
+        ctx.fillRect(0, 0, W, H);
+        break;
+      }
+      case "bw": case "negate": case "blur": {
+        const snap = snapshotCanvas(canvas);
+        ctx.filter = fx.kind === "bw" ? "grayscale(1)" : fx.kind === "negate" ? "invert(1)" : `blur(${((2 + 18 * s) * k).toFixed(1)}px)`;
+        ctx.drawImage(snap, 0, 0);
+        break;
+      }
+      case "vignette": {
+        const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.25, W / 2, H / 2, Math.hypot(W, H) / 2);
+        g.addColorStop(0, "rgba(0,0,0,0)");
+        g.addColorStop(1, `rgba(0,0,0,${(0.35 + 0.6 * s).toFixed(2)})`);
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, W, H);
+        break;
+      }
+      case "glitch": {
+        const off = Math.round((4 + 16 * s) * k);
+        const snap = snapshotCanvas(canvas);
+        const r = channelCopy(snap, "#ff0000"), gch = channelCopy(snap, "#00ff00"), b = channelCopy(snap, "#0000ff");
+        ctx.clearRect(0, 0, W, H);
+        ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
+        ctx.globalCompositeOperation = "lighter";
+        ctx.drawImage(r, -off, 0);
+        ctx.drawImage(gch, 0, Math.round(off / 3));
+        ctx.drawImage(b, off, 0);
+        break;
+      }
+      case "pixelate": {
+        const px = Math.max(1, (6 + 34 * s) * k);
+        const snap = snapshotCanvas(canvas);
+        const tw = Math.max(1, Math.round(W / px)), th = Math.max(1, Math.round(H / px));
+        const tmp = document.createElement("canvas");
+        tmp.width = tw; tmp.height = th;
+        tmp.getContext("2d").drawImage(snap, 0, 0, tw, th);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(tmp, 0, 0, W, H);
+        break;
+      }
+      case "letterbox": {
+        const bar = Math.round(H * (0.08 + 0.1 * s));
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, W, bar);
+        ctx.fillRect(0, H - bar, W, bar);
+        break;
+      }
+    }
+    ctx.restore();
+  }
+
   /* ---------- Preview ---------- */
 
   class Preview {
@@ -443,6 +540,11 @@
         if (track.kind !== "video" || track.hidden) return;
         for (const [ci, clip] of track.clips.entries()) {
           if (!(t >= clip.start && t < TL.clipEnd(clip))) continue;
+          if (clip.kind === "effect") {
+            applyEffect(this.canvas, clip.effect, t, clip.start, TL.clipEnd(clip), k);
+            boxes.push({ id: clip.id, pl: { cx: p.canvas.width / 2, cy: p.canvas.height / 2, w: p.canvas.width, h: p.canvas.height, rad: 0 }, kind: "effect" });
+            continue;
+          }
           const next = track.clips[ci + 1];
           const incoming = ci > 0 && TL.transitionActive(clip) ? clip.transition : null;
           const outgoing = next && TL.transitionActive(next) && next.start < TL.clipEnd(clip) - 1e-6 ? next.transition : null;
