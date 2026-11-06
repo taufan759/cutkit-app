@@ -20,7 +20,7 @@ const ROOT = path.resolve(__dirname, "..");
 const T = require(path.join(ROOT, "ui/core/timeline.js"));
 const C = require(path.join(ROOT, "ui/core/captions.js"));
 const TP = require(path.join(ROOT, "ui/core/templates.js"));
-const VERSION = (() => { try { return require(path.join(ROOT, "package.json")).version; } catch { return "0.1.0"; } })();
+const VERSION = (() => { try { return require(path.join(ROOT, "package.json")).version; } catch { return "0.0.0"; } })();
 const LIBRARY = [
   { name: "Meme Templates", path: "D:\\Master\\Pictures\\Meme Templates" },
   { name: "Sound Effect Meme", path: "D:\\Master\\Music\\Sound Effect Meme" },

@@ -97,6 +97,8 @@ Source: "..\ui\core\*.js"; DestDir: "{app}\ui\core"; Flags: ignoreversion
 Source: "..\ui\templates\*.json"; DestDir: "{app}\ui\templates"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
+; Versi untuk serverInfo MCP.
+Source: "..\package.json"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\CutKit"; Filename: "{app}\cutkit-app.exe"; Comment: "Editor video ringan"
