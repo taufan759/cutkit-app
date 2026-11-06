@@ -13,6 +13,7 @@ Dibangun dengan [Tauri 2](https://tauri.app) (Rust + WebView2 bawaan Windows) da
    - **⚡ Buat video cepat**: pilih satu folder berisi voice over, gambar/klip, dan caption, lalu timeline tersusun sendiri (Shorts atau YouTube 16:9).
    - **📐 Dari template**: susunan siap pakai (Fakta Shorts, Reaksi meme, Intro YouTube), tinggal pilih media pengganti.
    - **＋ Proyek kosong**: susun sendiri dari awal.
+   - **🤖 Pakai lewat Claude**: hubungkan CutKit ke Claude, lalu minta Claude yang mengedit (lihat bagian MCP).
 4. Rapikan bila perlu (potong dengan S, hapus dengan Delete, geser gambar di preview), lalu klik **Ekspor**.
 
 ### Isi folder untuk Buat Shorts cepat
@@ -109,15 +110,64 @@ Proyek diubah menjadi satu perintah ffmpeg (lihat `crates/cutkit-core/src/export
 
 Filter graph ditulis ke file (`-/filter_complex`) sehingga proyek panjang tidak terbentur batas panjang baris perintah Windows. Rumus penempatan klip dan pembagian halaman caption ada di Rust dan JS sekaligus; tes `parity` memastikan keduanya sama sehingga preview cocok dengan hasil ekspor.
 
-## MCP: pakai CutKit dari Claude
+## MCP: minta Claude yang mengedit
 
-CutKit punya server [MCP](https://modelcontextprotocol.io) (`mcp/server.js`), jadi Claude Code, Claude Desktop, atau klien MCP lain bisa menyusun dan mengekspor video lewat percakapan, misalnya *"buat Shorts dari folder ini, kasih caption kuning, ekspor ke Desktop"*. Proyek yang dibuat lewat MCP adalah file `.cutkit.json` biasa, jadi bisa dibuka dan dirapikan lagi di aplikasi.
+### Ini buat apa?
 
-Server ini memakai modul timeline yang sama dengan aplikasi (`ui/core`) dan menjalankan pekerjaan berat lewat `cutkit-cli` (ffmpeg, Whisper, Piper, hapus background). Model AI dibaca dari folder model aplikasi, jadi model yang sudah diunduh di aplikasi langsung terpakai.
+[MCP](https://modelcontextprotocol.io) adalah "colokan" yang membuat Claude bisa memakai aplikasi di komputermu. Setelah CutKit dihubungkan, kamu tidak perlu mengklik timeline satu per satu: cukup ketik permintaan di Claude, misalnya
+
+> Pakai CutKit: buat Shorts dari folder D:\Konten\Video1, caption kuning, lalu ekspor.
+
+lalu Claude yang mengerjakan langkah-langkahnya dengan fitur CutKit: melihat isi folder, mengimpor media, menyusun timeline, membuat caption dari suara (Whisper), mengecek hasilnya per frame (Claude benar-benar melihat gambarnya), lalu mengekspor MP4. Hasilnya file proyek `.cutkit.json` biasa, jadi bisa dibuka dan dirapikan lagi di aplikasi. Semuanya tetap berjalan di komputermu.
+
+Cocok untuk pekerjaan berulang: caption untuk banyak video sekaligus, Shorts dari puluhan folder, menaruh meme dan SFX di detik tertentu, atau video dari naskah TTS.
+
+### Cara menjalankan (sekali saja)
+
+1. Pasang CutKit dari installer. Server MCP dan `cutkit-cli` sudah ikut di dalamnya.
+2. Pastikan [Node.js](https://nodejs.org) terpasang (server MCP berjalan dengan Node). Kalau belum: `winget install OpenJS.NodeJS.LTS`.
+3. Buka CutKit → **Proyek → 🤖 Hubungkan ke Claude (MCP)** (atau tombol **Pakai lewat Claude** di layar sambutan), lalu klik **Hubungkan** di aplikasi Claude yang kamu pakai:
+   - **Claude Code**: juga berlaku untuk tab Code di aplikasi Claude.
+   - **Claude Desktop**: untuk chat biasa.
+4. Tutup lalu buka ulang Claude. Tool `cutkit_*` muncul, dan kamu bisa langsung mengetik permintaan.
+
+Server tidak perlu dijalankan sendiri: Claude yang menyalakannya otomatis setiap kali dibutuhkan. CutKit membuat cadangan file konfigurasi lama (`.cutkit-backup`) sebelum mengubahnya, dan hanya menambah entri `cutkit`. Tombol **Putuskan** menghapusnya lagi.
+
+Contoh permintaan:
+
+- *Pakai CutKit: kasih caption otomatis ke video D:\Rekaman\vlog.mp4 gaya youtube, lalu ekspor versi bercaption.*
+- *Pakai CutKit: cari meme kaget di Meme Templates dan SFX boom, taruh di detik 5 proyek D:\Konten\Shorts.cutkit.json, terus tunjukkan frame-nya.*
+- *Pakai CutKit: jadikan naskah ini suara dan video dengan gambar dari D:\Gambar, ganti gambar tiap kalimat.*
+- *Pakai CutKit: buka proyek tadi di aplikasi.*
+
+Di Claude Desktop juga ada prompt siap pakai dari CutKit (menu ➕ / lampiran): **Buat Shorts dari folder**, **Caption otomatis untuk video**, dan **Video dari naskah (TTS)**.
+
+### Pasang manual
+
+Untuk klien MCP lain, atau bila menjalankan dari kode sumber (build `cutkit-cli` dulu dengan `npm run build:cli`):
+
+```bash
+claude mcp add --scope user cutkit -- node "D:/Proyek Programming/cutkit-app/mcp/server.js"
+```
+
+Atau tambahkan ke file konfigurasi MCP klien:
+
+```json
+{
+  "mcpServers": {
+    "cutkit": { "command": "node", "args": ["C:/Users/<nama>/AppData/Local/CutKit/mcp/server.js"] }
+  }
+}
+```
+
+Saat membuka folder repo ini, Claude Code juga membaca `.mcp.json` dan menawarkan server `cutkit` secara otomatis.
+
+### Daftar tool
 
 | Tool | Fungsi |
 |---|---|
 | `cutkit_status` | Lokasi ffmpeg, folder model, model yang sudah terpasang |
+| `cutkit_list_media` | Melihat isi folder (pustaka Meme Templates, Sound Effect Meme, Video, Unduhan, ...) dengan saringan jenis dan nama |
 | `cutkit_new_project`, `cutkit_project_summary` | Buat proyek (9:16, 16:9, 4K, 1:1, ...) dan lihat isinya |
 | `cutkit_import_media`, `cutkit_add_clip`, `cutkit_edit_clip`, `cutkit_split_clip`, `cutkit_delete_clip` | Susun timeline: posisi, durasi, kecepatan, volume, fade, Ken Burns, latar blur, chroma, filter warna, transisi, keyframe |
 | `cutkit_add_text`, `cutkit_add_effect` | Teks judul dan efek (getar, kilat, glitch, ...) |
@@ -126,29 +176,21 @@ Server ini memakai modul timeline yang sama dengan aplikasi (`ui/core`) dan menj
 | `cutkit_tts` | Naskah jadi suara Piper + caption |
 | `cutkit_detect_beats`, `cutkit_remove_background` | Ketukan musik dan hapus background tanpa green screen |
 | `cutkit_list_templates`, `cutkit_apply_template` | Proyek dari template |
-| `cutkit_export` | Ekspor MP4 dengan progres (notifikasi MCP) |
+| `cutkit_preview_frame` | Merender frame di detik tertentu persis seperti hasil ekspor dan mengirimkannya sebagai gambar ke Claude |
+| `cutkit_export` | Ekspor MP4 dengan progres |
+| `cutkit_open_in_app` | Membuka proyek di aplikasi CutKit |
 | `cutkit_download_model` | Unduh model AI |
 
-Pasang (sekali):
-
-```bash
-cargo build --release -p cutkit-cli
-```
-
-Claude Code membaca `.mcp.json` di folder repo ini secara otomatis saat dibuka di sini. Untuk semua folder, tambahkan ke `~/.claude.json` (atau `claude_desktop_config.json` untuk Claude Desktop):
-
-```json
-{
-  "mcpServers": {
-    "cutkit": { "command": "node", "args": ["D:/Proyek Programming/cutkit-app/mcp/server.js"] }
-  }
-}
-```
+Server memakai modul timeline yang sama dengan aplikasi (`ui/core`) dan menjalankan pekerjaan berat lewat `cutkit-cli` (ffmpeg, Whisper, Piper, hapus background). Model AI dibaca dari folder model aplikasi, jadi model yang sudah diunduh di aplikasi langsung terpakai.
 
 `cutkit-cli` juga bisa dipakai langsung dari terminal, hasilnya JSON:
 
 ```bash
 target/release/cutkit-cli info
+```
+
+```bash
+target/release/cutkit-cli frame "D:\Proyek\Shorts.cutkit.json" 3.5 "D:\cek.png"
 ```
 
 ```bash
