@@ -654,6 +654,18 @@ fn mcp_cli_path(server: &Path) -> Option<PathBuf> {
     [dir.join("cutkit-cli.exe"), dir.join("..").join("target").join("release").join("cutkit-cli.exe")].into_iter().find(|p| p.is_file())
 }
 
+/// Folder program CutKit (tempat cutkit-app.exe); Node.js portabel dipasang di `node\` di dalamnya.
+fn app_dir() -> Option<PathBuf> {
+    std::env::current_exe().ok()?.parent().map(Path::to_path_buf)
+}
+
+/// Memasang Node.js LTS portabel untuk server MCP. Progres lewat event `node-progress` (byte, total).
+#[tauri::command]
+async fn mcp_install_node(app: AppHandle) -> Result<String, String> {
+    let dir = app_dir().ok_or("Folder program tidak diketahui")?;
+    blocking(move || cutkit_core::setup::install_node(&dir, |got, total| { let _ = app.emit("node-progress", (got, total)); })).await
+}
+
 /// Path dengan garis miring biasa agar mudah dibaca di JSON dan perintah.
 fn slash(p: &Path) -> String {
     p.to_string_lossy().replace('\\', "/").replace("/./", "/")
@@ -663,7 +675,7 @@ fn slash(p: &Path) -> String {
 fn mcp_info(app: AppHandle) -> McpInfo {
     let server = mcp_server_path(&app).map(|p| std::fs::canonicalize(&p).map(|c| PathBuf::from(c.to_string_lossy().trim_start_matches(r"\\?\").to_string())).unwrap_or(p));
     let cli = server.as_deref().and_then(mcp_cli_path);
-    let node = cutkit_core::mcpcfg::find_node();
+    let node = cutkit_core::mcpcfg::find_node(app_dir().as_deref());
     let server_s = server.as_deref().map(slash).unwrap_or_default();
     let clients = cutkit_core::mcpcfg::clients()
         .into_iter()
@@ -695,7 +707,7 @@ fn mcp_info(app: AppHandle) -> McpInfo {
 fn mcp_install(app: AppHandle, client: String) -> Result<Option<String>, String> {
     let server = mcp_server_path(&app).ok_or("File server MCP tidak ditemukan di folder aplikasi. Pasang ulang CutKit.")?;
     let server = std::fs::canonicalize(&server).map(|c| PathBuf::from(c.to_string_lossy().trim_start_matches(r"\\?\").to_string())).unwrap_or(server);
-    let node = cutkit_core::mcpcfg::find_node().ok_or("Node.js belum terpasang. Pasang dulu: winget install OpenJS.NodeJS.LTS")?;
+    let node = cutkit_core::mcpcfg::find_node(app_dir().as_deref()).ok_or("Node.js belum ada. Klik Pasang Node.js dulu.")?;
     let (_, _, path) = cutkit_core::mcpcfg::clients().into_iter().find(|(id, _, _)| *id == client).ok_or("Klien tidak dikenal")?;
     let backup = cutkit_core::mcpcfg::install(&path, "cutkit", &node, &[slash(&server)])?;
     Ok(backup.map(|b| b.to_string_lossy().to_string()))
@@ -770,6 +782,7 @@ fn main() {
             mcp_info,
             mcp_install,
             mcp_uninstall,
+            mcp_install_node,
             launch_project
         ])
         .run(tauri::generate_context!())

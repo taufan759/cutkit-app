@@ -2479,7 +2479,18 @@ async function mcpDialog() {
   const ready = !!(info.server && info.cli && info.node);
   const rows = [
     item(!!info.server && !!info.cli, info.server && info.cli ? "Server MCP CutKit siap" : "Server MCP tidak lengkap", info.server ? info.server : "File mcp/server.js tidak ditemukan. Pasang ulang CutKit."),
-    item(!!info.node, info.node ? "Node.js terpasang" : "Node.js belum terpasang", info.node || "Server MCP dijalankan dengan Node.js. Pasang lewat terminal: winget install OpenJS.NodeJS.LTS, lalu buka ulang jendela ini."),
+    item(!!info.node, info.node ? "Node.js siap" : "Node.js belum ada", info.node || "Server MCP berjalan dengan Node.js. CutKit bisa memasang versi portabel (±30 MB) khusus untuknya, tanpa mengubah komputer.",
+      info.node ? null : (() => {
+        const b = el("button", { class: "btn small primary" }, "Pasang Node.js");
+        b.addEventListener("click", async () => {
+          b.disabled = true;
+          const un = await tauri.event.listen("node-progress", (e) => { const [got, total] = e.payload; b.textContent = total ? `${Math.round((got / total) * 100)}%` : `${(got / 1048576).toFixed(0)} MB`; });
+          try { const v = await invoke("mcp_install_node"); toast(`Node.js ${v} terpasang.`); }
+          catch (e) { toast(errMsg(e), true); }
+          finally { un(); mcpDialog(); }
+        });
+        return b;
+      })()),
     el("h4", {}, "1. Pilih aplikasi Claude yang dipakai"),
   ];
   for (const c of info.clients) {

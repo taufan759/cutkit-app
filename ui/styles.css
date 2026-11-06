@@ -296,7 +296,7 @@ input[type=range] { accent-color: var(--accent); }
 .check-row .mark { font-size: 16px; text-align: center; color: var(--muted); }
 .check-row.ok .mark { color: var(--ok); }
 .check-row.bad .mark { color: var(--danger); }
-.check-row .hint { word-break: break-all; }
+.check-row .hint { overflow-wrap: anywhere; }
 .setup-log { background: #0b0b0e; border: 1px solid var(--border); border-radius: 8px; padding: 8px; font: 11px Consolas, monospace; max-height: 180px; overflow: auto; white-space: pre-wrap; margin: 0; user-select: text; }
 .progress.indeterminate > div { width: 35%; animation: indet 1.2s ease-in-out infinite; }
 @keyframes indet { from { transform: translateX(-100%); } to { transform: translateX(300%); } }

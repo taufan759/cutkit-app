@@ -158,7 +158,7 @@ const commands = {
   mcp_info: () => {
     const server = path.resolve(__dirname, "../../mcp/server.js").replace(/\\/g, "/");
     return {
-      server, cli: path.resolve(__dirname, "../../target/release/cutkit-cli.exe").replace(/\\/g, "/"), node: process.execPath,
+      server, cli: path.resolve(__dirname, "../../target/release/cutkit-cli.exe").replace(/\\/g, "/"), node: mcpState.node,
       command_line: `claude mcp add --scope user cutkit -- node "${server}"`,
       snippet: JSON.stringify({ mcpServers: { cutkit: { command: "node", args: [server] } } }, null, 2),
       clients: [
@@ -168,9 +168,10 @@ const commands = {
     };
   },
   mcp_install: ({ client }) => { mcpState[client] = true; return "C:\\Users\\uji\\.claude.json.cutkit-backup"; },
+  mcp_install_node: () => { mcpState.node = "C:\\Users\\uji\\AppData\\Local\\CutKit\\node\\node.exe"; return "24.11.1"; },
   mcp_uninstall: ({ client }) => { const was = mcpState[client]; mcpState[client] = false; return was; },
 };
-const mcpState = { "claude-code": false, "claude-desktop": false };
+const mcpState = { "claude-code": false, "claude-desktop": false, node: null };
 let lastExport = null;
 
 const MOCK = `
