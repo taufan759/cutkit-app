@@ -51,6 +51,7 @@ pub struct ExportPlan {
 
 struct Visual {
     input: usize,
+    blur_bg: bool,
     speed: f64,
     motion: Option<(Motion, u64)>,
     start: f64,
@@ -161,7 +162,7 @@ pub fn build_plan(project: &Project, opts: &ExportOptions) -> Result<ExportPlan,
             if want_video {
                 let pl = place(w, h, asset.width, asset.height, clip.fit, &clip.transform);
                 let motion = clip.motion.is_active().then(|| (clip.motion.clone(), (clip.source_duration() * fps).round().max(1.0) as u64));
-                visuals.push(Visual { input, speed: clip.effective_speed(), motion, start: clip.start, end: clip.end(), place: pl, opacity: clip.transform.opacity.clamp(0.0, 1.0) });
+                visuals.push(Visual { input, blur_bg: clip.background == "blur", speed: clip.effective_speed(), motion, start: clip.start, end: clip.end(), place: pl, opacity: clip.transform.opacity.clamp(0.0, 1.0) });
             }
             if want_audio {
                 audios.push(AudioSrc {
@@ -179,8 +180,26 @@ pub fn build_plan(project: &Project, opts: &ExportOptions) -> Result<ExportPlan,
 
     let mut g: Vec<String> = vec![];
     g.push("[0:v]format=rgba[b0]".into());
+    // Radius blur latar sebanding ukuran kanvas (40 px untuk 1080).
+    let blur_radius = ((w.min(h) as f64) / 27.0).round().max(4.0) as u32;
     for (i, v) in visuals.iter().enumerate() {
         let p = &v.place;
+        let pts = if (v.speed - 1.0).abs() > 1e-6 {
+            format!("setpts=(PTS-STARTPTS)/{}+{}/TB", f(v.speed), f(v.start))
+        } else {
+            format!("setpts=PTS-STARTPTS+{}/TB", f(v.start))
+        };
+        let mut base = format!("[b{i}]");
+        let mut src = format!("[{}:v]", v.input);
+        if v.blur_bg {
+            g.push(format!("[{}:v]split=2[s{i}][q{i}]", v.input));
+            g.push(format!(
+                "[q{i}]format=rgba,scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},boxblur={blur_radius}:2,{pts}[l{i}]"
+            ));
+            g.push(format!("[b{i}][l{i}]overlay=x=0:y=0:format=rgb:eof_action=pass:enable='between(t,{},{})'[k{i}]", f(v.start), f(v.end)));
+            base = format!("[k{i}]");
+            src = format!("[s{i}]");
+        }
         let mut chain = match &v.motion {
             // Diperbesar 2x dulu supaya pembulatan posisi zoompan tidak membuat gambar bergetar.
             Some((m, frames)) => {
@@ -188,8 +207,7 @@ pub fn build_plan(project: &Project, opts: &ExportOptions) -> Result<ExportPlan,
                 // Faktor dibatasi agar sisi terpanjang <= 4096 px (klip besar tetap ringan di laptop).
                 let k = (4096.0 / p.w.max(p.h) as f64).clamp(1.0, 2.0);
                 format!(
-                    "[{}:v]format=rgba,fps={},scale={}:{},zoompan=z='{z}':x='{x}':y='{y}':d=1:s={}x{}:fps={}",
-                    v.input,
+                    "{src}format=rgba,fps={},scale={}:{},zoompan=z='{z}':x='{x}':y='{y}':d=1:s={}x{}:fps={}",
                     f(fps),
                     (p.w as f64 * k).round() as u32,
                     (p.h as f64 * k).round() as u32,
@@ -198,7 +216,7 @@ pub fn build_plan(project: &Project, opts: &ExportOptions) -> Result<ExportPlan,
                     f(fps)
                 )
             }
-            None => format!("[{}:v]format=rgba,scale={}:{}", v.input, p.w, p.h),
+            None => format!("{src}format=rgba,scale={}:{}", p.w, p.h),
         };
         if p.radians.abs() > 1e-9 {
             chain.push_str(&format!(",rotate={}:ow={}:oh={}:c=0x00000000", f(p.radians), p.ow, p.oh));
@@ -206,14 +224,10 @@ pub fn build_plan(project: &Project, opts: &ExportOptions) -> Result<ExportPlan,
         if v.opacity < 0.999 {
             chain.push_str(&format!(",colorchannelmixer=aa={}", f(v.opacity)));
         }
-        if (v.speed - 1.0).abs() > 1e-6 {
-            chain.push_str(&format!(",setpts=(PTS-STARTPTS)/{}+{}/TB[v{i}]", f(v.speed), f(v.start)));
-        } else {
-            chain.push_str(&format!(",setpts=PTS-STARTPTS+{}/TB[v{i}]", f(v.start)));
-        }
+        chain.push_str(&format!(",{pts}[v{i}]"));
         g.push(chain);
         g.push(format!(
-            "[b{i}][v{i}]overlay=x={}:y={}:format=rgb:eof_action=pass:enable='between(t,{},{})'[b{}]",
+            "{base}[v{i}]overlay=x={}:y={}:format=rgb:eof_action=pass:enable='between(t,{},{})'[b{}]",
             p.x,
             p.y,
             f(v.start),
@@ -403,6 +417,20 @@ mod tests {
         assert!(g.contains("[2:v]format=rgba,fps=30,scale=4096:2304,zoompan=z='1+0.1':x='(iw-iw/zoom)*(1-min(on/119,1))':y='(ih-ih/zoom)*0.5':d=1:s=3413x1920:fps=30,setpts"), "{g}");
         p.tracks[0].clips[0].motion.kind = "none".into();
         assert!(!build_plan(&p, &opts()).unwrap().filter_script.contains("[2:v]format=rgba,fps"));
+    }
+
+    #[test]
+    fn blur_background_splits_input_and_overlays_behind() {
+        let mut p = project();
+        p.tracks[0].clips[0].fit = Fit::Contain;
+        p.tracks[0].clips[0].background = "blur".into();
+        let g = build_plan(&p, &opts()).unwrap().filter_script;
+        let lines: Vec<&str> = g.lines().collect();
+        assert_eq!(lines[1], "[2:v]split=2[s0][q0];");
+        assert_eq!(lines[2], "[q0]format=rgba,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=40:2,setpts=PTS-STARTPTS+0/TB[l0];");
+        assert_eq!(lines[3], "[b0][l0]overlay=x=0:y=0:format=rgb:eof_action=pass:enable='between(t,0,4)'[k0];");
+        assert!(lines[4].starts_with("[s0]format=rgba,scale=1080:608,"));
+        assert!(lines[5].starts_with("[k0][v0]overlay=x=0:y=656:"));
     }
 
     #[test]

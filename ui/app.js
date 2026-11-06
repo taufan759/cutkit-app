@@ -1034,6 +1034,7 @@ function renderInspector() {
     sections.push(el("section", {},
       el("h4", {}, "Posisi & ukuran"),
       c.kind !== "text" ? field("Isi kanvas", segmented([["contain", "Pas"], ["cover", "Penuh"]], c.fit, (v) => commit((pp) => TL.updateClip(pp, c.id, { fit: v })))) : null,
+      c.kind !== "text" ? field("Latar", segmented([["none", "Warna kanvas"], ["blur", "Blur"]], c.background, (v) => commit((pp) => TL.updateClip(pp, c.id, { background: v })))) : null,
       slider("X", t.x, { min: -p.canvas.width, max: p.canvas.width, apply: (v) => upd({ transform: { x: v } }) }),
       slider("Y", t.y, { min: -p.canvas.height, max: p.canvas.height, apply: (v) => upd({ transform: { y: v } }) }),
       slider("Skala", t.scale, { min: 5, max: 400, unit: "%", fromModel: (v) => v * 100, toModel: (v) => v / 100, apply: (v) => upd({ transform: { scale: v } }) }),

@@ -99,6 +99,7 @@
     c.fit = c.fit || "contain";
     c.transform = Object.assign(defaultTransform(), c.transform || {});
     c.motion = Object.assign({ kind: "none", amount: 0.15 }, c.motion || {});
+    c.background = c.background === "blur" ? "blur" : "none";
     if (c.kind === "text") {
       c.text = c.text || { text: "", style: defaultTextStyle() };
       c.text.style = Object.assign(defaultTextStyle(), c.text.style || {});

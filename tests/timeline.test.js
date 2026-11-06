@@ -271,3 +271,8 @@ test("autoAssemble dengan gerak otomatis: gambar bergantian zoom masuk/keluar, v
   T.updateClip(q, "x", { motion: { kind: "pan-left" } });
   assert.deepEqual(q.tracks[0].clips[0].motion, { kind: "pan-left", amount: 0.15 });
 });
+
+test("latar blur dinormalisasi ke none/blur", () => {
+  const p = T.normalize({ tracks: [{ id: "v1", clips: [{ id: "a", start: 0, duration: 1, background: "blur" }, { id: "b", start: 1, duration: 1, background: "aneh" }] }] });
+  assert.deepEqual(p.tracks[0].clips.map((c) => c.background), ["blur", "none"]);
+});

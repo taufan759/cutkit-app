@@ -356,6 +356,17 @@
             const m = this.media.get(clip.id);
             if (m && m.el.readyState >= 2) source = m.el;
           }
+          if (source && clip.background === "blur") {
+            // Sama dengan ekspor: cover ke kanvas lalu boxblur (radius kanvas/27, dua putaran ~ gaussian 0.8r).
+            const sw = source.videoWidth || source.naturalWidth || 1;
+            const sh = source.videoHeight || source.naturalHeight || 1;
+            const s = Math.max(p.canvas.width / sw, p.canvas.height / sh);
+            const r = Math.max(4, Math.round(Math.min(p.canvas.width, p.canvas.height) / 27));
+            ctx.save();
+            ctx.filter = `blur(${(r * 0.8 * k).toFixed(1)}px)`;
+            ctx.drawImage(source, (p.canvas.width - sw * s) / 2, (p.canvas.height - sh * s) / 2, sw * s, sh * s);
+            ctx.restore();
+          }
           ctx.save();
           ctx.globalAlpha = Math.max(0, Math.min(1, clip.transform.opacity));
           ctx.translate(pl.cx, pl.cy);

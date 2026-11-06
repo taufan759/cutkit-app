@@ -117,6 +117,8 @@ pub struct Clip {
     pub transform: Transform,
     /// Gerak isi klip (Ken Burns): zoom atau geser pelan di dalam bingkai klip.
     pub motion: Motion,
+    /// Latar di belakang klip yang tidak memenuhi kanvas: "none" atau "blur" (klip yang sama, diperbesar dan diburamkan).
+    pub background: String,
     pub text: Option<TextClip>,
 }
 
@@ -137,6 +139,7 @@ impl Default for Clip {
             fit: Fit::Contain,
             transform: Transform::default(),
             motion: Motion::default(),
+            background: "none".into(),
             text: None,
         }
     }
