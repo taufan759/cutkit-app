@@ -550,6 +550,59 @@ async fn detect_beats(path: String, state: State<'_, AppState>) -> Result<Option
     blocking(move || cutkit_core::beats::detect(&tools.ffmpeg, &path, 0.0, 0.0)).await
 }
 
+#[derive(Serialize)]
+struct MattingStatus {
+    python_ready: bool,
+}
+
+#[tauri::command]
+async fn matting_status(state: State<'_, AppState>) -> Result<MattingStatus, String> {
+    let dir = state.models_dir();
+    blocking(move || Ok(MattingStatus { python_ready: cutkit_core::matting::python_ready(&dir) })).await
+}
+
+/// Memasang venv Python + onnxruntime/numpy/pillow di folder model; log lewat event `setup-log`.
+#[tauri::command]
+async fn matting_setup(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let dir = state.models_dir();
+    let cancel = state.begin_ai()?;
+    let app2 = app.clone();
+    let r = blocking(move || cutkit_core::matting::setup_python(&dir, cancel, |l| { let _ = app2.emit("setup-log", l); })).await;
+    state.end_ai();
+    r
+}
+
+/// Hapus background: gambar -> PNG, video (bagian start..start+duration) -> WebM beralpha.
+/// Progres video lewat event `matting-progress` ({ done, total }).
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+async fn remove_bg(app: AppHandle, path: String, kind: String, start: f64, duration: f64, has_audio: bool, fps: f64, model: String, out_path: String, state: State<'_, AppState>) -> Result<String, String> {
+    let tools = state.tools()?;
+    let dir = state.models_dir();
+    let m = cutkit_core::ai::model(&model).filter(|m| m.kind == "matting").ok_or("Model hapus background tidak dikenal.")?;
+    if !cutkit_core::ai::is_installed(&dir, m) {
+        return Err(format!("Model {} belum diunduh.", m.label));
+    }
+    let cancel = state.begin_ai()?;
+    let work = state.cache_dir.join("matting").join(format!("{}", std::process::id()));
+    let app2 = app.clone();
+    let r = blocking(move || {
+        let model_path = dir.join(m.file);
+        let out = PathBuf::from(&out_path);
+        if kind == "image" {
+            cutkit_core::matting::remove_bg_image(&dir, &model_path, &path, &out)?;
+        } else {
+            cutkit_core::matting::remove_bg_video(&tools.ffmpeg, &dir, &model_path, &path, start, duration, fps, has_audio, &work, &out, cancel, |done, total| {
+                let _ = app2.emit("matting-progress", serde_json::json!({ "done": done, "total": total }));
+            })?;
+        }
+        Ok(out_path)
+    })
+    .await;
+    state.end_ai();
+    r
+}
+
 #[tauri::command]
 fn open_path(app: AppHandle, path: String) -> Result<(), String> {
     app.opener().open_path(path, None::<&str>).map_err(|e| e.to_string())
@@ -609,6 +662,9 @@ fn main() {
             transcribe,
             tts,
             detect_beats,
+            matting_status,
+            matting_setup,
+            remove_bg,
             open_path,
             reveal_path
         ])

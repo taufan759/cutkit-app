@@ -382,7 +382,7 @@ async function importPaths(paths) {
       const asset = {
         id: TL.uid("m"), path: r.path, kind: i.kind, name: baseName(r.path), duration: i.duration,
         width: i.width, height: i.height, has_audio: i.has_audio, has_video: i.has_video,
-        proxy: null, waveform: null, playable: i.playable,
+        proxy: null, waveform: null, playable: i.playable, alpha: !!i.alpha,
       };
       added.push(asset);
       result.set(r.path.toLowerCase(), asset);
@@ -990,6 +990,58 @@ window.renderStickerSection = () => [
   el("p", { class: "hint" }, "Emoji Twemoji © Twitter, Inc. dan kontributor, lisensi CC-BY 4.0."),
 ];
 
+/* ---------- hapus background (AI) ---------- */
+
+async function removeBackground(clipId, modelId) {
+  const found = TL.findClip(state.project, clipId);
+  if (!found) return;
+  const c = found.clip;
+  const asset = TL.getAsset(state.project, c.asset_id);
+  const bar = el("div");
+  const status = el("p", { class: "hint" }, "Menyiapkan…");
+  const log = el("pre", { class: "setup-log hidden" });
+  openModal(el("h2", {}, "✂ Hapus background"), el("div", { class: "progress indeterminate" }, bar), status, log,
+    el("div", { class: "modal-actions" }, el("button", { class: "btn", onclick: () => invoke("ai_cancel").catch(() => {}) }, "Batalkan")));
+  const say = (t, frac) => { status.textContent = t; if (frac != null) { bar.parentElement.classList.remove("indeterminate"); bar.style.width = `${(frac * 100).toFixed(1)}%`; } };
+  try {
+    const st = await invoke("matting_status");
+    if (!st.python_ready) {
+      say("Memasang komponen AI (Python, onnxruntime) sekali saja…");
+      log.classList.remove("hidden");
+      const un = await tauri.event.listen("setup-log", (ev) => { log.textContent = (log.textContent + "\n" + ev.payload).split("\n").slice(-30).join("\n"); log.scrollTop = log.scrollHeight; });
+      try { await invoke("matting_setup"); } finally { un(); }
+      log.classList.add("hidden");
+    }
+    await ensureModels([modelId], say);
+    let base;
+    if (state.path) base = dirName(state.path);
+    else { try { base = joinPath(await tauri.path.documentDir(), "CutKit"); } catch { base = "C:\\CutKit"; } }
+    const stem = asset.name.replace(/\.[^.]+$/, "");
+    const isImage = c.kind === "image";
+    const out = joinPath(joinPath(base, "tanpa-latar"), `${stem}-${stamp()}.${isImage ? "png" : "webm"}`);
+    const srcDur = c.duration * TL.speedOf(c);
+    say(isImage ? "Memisahkan objek dari latar…" : `Memproses ${Math.round(srcDur * state.project.canvas.fps)} frame…`, isImage ? null : 0);
+    const un = await tauri.event.listen("matting-progress", (ev) => say(`Frame ${ev.payload.done}/${ev.payload.total}`, ev.payload.done / ev.payload.total));
+    try {
+      await invoke("remove_bg", { path: asset.path, kind: c.kind, start: c.in, duration: srcDur, hasAudio: !!asset.has_audio, fps: state.project.canvas.fps, model: modelId, outPath: out });
+    } finally { un(); }
+    const [na] = await importPaths([out]);
+    if (!na) throw new Error("Hasil tidak bisa diimpor.");
+    commit((p) => {
+      const cl = TL.findClip(p, clipId).clip;
+      cl.asset_id = na.id;
+      if (!isImage) cl.in = 0;
+      cl.chroma.enabled = false;
+    });
+    closeModal();
+    toast("Background dihapus. Klip sekarang memakai versi transparan (aslinya tetap ada di panel Media).");
+  } catch (e) {
+    openModal(el("h2", {}, String(errMsg(e)).includes("ibatalkan") ? "Dibatalkan" : "Hapus background gagal"),
+      el("pre", { style: "white-space:pre-wrap;font-size:12px;color:var(--danger);user-select:text" }, errMsg(e)),
+      el("div", { class: "modal-actions" }, el("button", { class: "btn primary", onclick: closeModal }, "Tutup")));
+  }
+}
+
 /* ---------- ketukan musik ---------- */
 
 async function detectBeats(asset) {
@@ -1517,6 +1569,15 @@ function renderInspector() {
   }
 
   if (c.kind === "video" || c.kind === "image") {
+    const mSel = el("select", {}, el("option", { value: "matting-fast" }, "Cepat (4,6 MB)"), el("option", { value: "matting-best", selected: localStorage.getItem("cutkit.matting") === "matting-best" }, "Akurat (179 MB)"));
+    mSel.addEventListener("change", () => localStorage.setItem("cutkit.matting", mSel.value));
+    sections.push(el("section", {},
+      el("h4", {}, "Hapus background (AI)"),
+      field("Model", mSel),
+      el("button", { class: "btn small primary", onclick: () => removeBackground(c.id, mSel.value) }, "✂ Hapus background"),
+      el("p", { class: "hint" }, c.kind === "video"
+        ? "Tanpa green screen: tiap frame diproses di komputermu (bisa beberapa menit untuk klip panjang), hasilnya video transparan."
+        : "Tanpa green screen: orang/benda dipisahkan dari latarnya, hasilnya PNG transparan.")));
     const col = c.color;
     const pctSlider = (label, key, min, max) => slider(label, col[key], { min, max, unit: "%", fromModel: (v) => v * 100, toModel: (v) => v / 100, apply: (v) => upd({ color: { [key]: v } }) });
     const pickLut = async () => {

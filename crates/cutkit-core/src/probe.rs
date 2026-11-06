@@ -18,6 +18,8 @@ pub struct MediaInfo {
     pub container: String,
     /// Apakah WebView2 bisa memutar file ini langsung; kalau tidak, dibuatkan proxy.
     pub playable: bool,
+    /// Video VP8/VP9 dengan kanal alpha (tag alpha_mode=1).
+    pub alpha: bool,
 }
 
 const IMAGE_CODECS: &[&str] = &["png", "mjpeg", "webp", "bmp", "tiff", "psd", "ppm", "pgm", "jpeg2000", "jpegxl", "heif", "hevc_still", "targa"];
@@ -57,6 +59,7 @@ pub fn parse_ffprobe(path: &str, json: &str) -> Result<MediaInfo, String> {
         match codec_type {
             "video" if !info.has_video && !disposition_cover => {
                 info.has_video = true;
+                info.alpha = s.get("tags").and_then(|t| t.get("alpha_mode").or_else(|| t.get("ALPHA_MODE"))).and_then(|v| v.as_str()) == Some("1");
                 info.video_codec = codec;
                 let mut w = num(s.get("width")) as u32;
                 let mut h = num(s.get("height")) as u32;
@@ -162,6 +165,14 @@ mod tests {
         assert!((info.fps - 29.97).abs() < 0.01);
         assert_eq!(info.duration, 12.5);
         assert!(!info.playable, "HEVC di MOV butuh proxy");
+    }
+
+    #[test]
+    fn webm_alpha_is_detected() {
+        let json = r#"{"streams":[{"codec_type":"video","codec_name":"vp9","width":720,"height":1280,"avg_frame_rate":"30/1","tags":{"alpha_mode":"1"}}],"format":{"format_name":"matroska,webm","duration":"2"}}"#;
+        let i = parse_ffprobe("x.webm", json).unwrap();
+        assert!(i.alpha && i.playable);
+        assert!(!parse_ffprobe("x.webm", &json.replace("\"1\"", "\"0\"")).unwrap().alpha);
     }
 
     #[test]

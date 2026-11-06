@@ -346,6 +346,10 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String, Ve
                     args.extend(strings(&["-ss", &f(clip.source_in)]));
                 }
                 args.extend(strings(&["-t", &f(clip.source_duration())]));
+                // Decoder bawaan VP9 membuang kanal alpha; libvpx membacanya.
+                if want_video && asset.alpha {
+                    args.extend(strings(&["-c:v", "libvpx-vp9"]));
+                }
                 if !want_video {
                     args.push("-vn".into());
                 }
@@ -1109,6 +1113,14 @@ mod tests {
         assert_eq!(keyframe_value(&k, 1.0, |k| k.x), 0.0);
         assert_eq!(keyframe_value(&k, -1.0, |k| k.x), -100.0);
         assert_eq!(keyframe_value(&k, 5.0, |k| k.x), 100.0);
+    }
+
+    #[test]
+    fn alpha_webm_uses_libvpx_decoder() {
+        let mut p = project();
+        p.assets[0].alpha = true;
+        let a = build_plan(&p, &opts()).unwrap().args.join(" ");
+        assert!(a.contains("-ss 2.5 -t 4 -c:v libvpx-vp9 -i C:/media/a.mp4"), "{a}");
     }
 
     #[test]

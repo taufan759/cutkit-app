@@ -84,6 +84,26 @@ pub const MODELS: &[ModelInfo] = &[
         size: 5_050,
     },
     ModelInfo {
+        id: "matting-fast",
+        kind: "matting",
+        label: "Cepat (U²-Net kecil)",
+        note: "4,6 MB. Cepat, tepi kurang halus. Cocok untuk mencoba dan video panjang.",
+        file: "u2netp.onnx",
+        url: "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx",
+        sha256: "309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8",
+        size: 4_574_861,
+    },
+    ModelInfo {
+        id: "matting-best",
+        kind: "matting",
+        label: "Akurat (IS-Net)",
+        note: "179 MB. Tepi rapi untuk orang dan benda; lebih lambat.",
+        file: "isnet-general-use.onnx",
+        url: "https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet-general-use.onnx",
+        sha256: "60920e99c45464f2ba57bee2ad08c919a52bbf852739e96947fbb4358c0d964a",
+        size: 178_648_008,
+    },
+    ModelInfo {
         id: "vad-silero",
         kind: "vad",
         label: "Deteksi suara (Silero VAD)",
@@ -279,7 +299,7 @@ mod tests {
     #[test]
     fn catalog_and_install_check() {
         assert!(model("whisper-small").unwrap().url.ends_with("ggml-small-q5_1.bin"));
-        assert!(MODELS.iter().all(|m| m.sha256.len() == 64 && (m.url.starts_with("https://huggingface.co/") || m.url.starts_with("https://github.com/rhasspy/piper/"))));
+        assert!(MODELS.iter().all(|m| m.sha256.len() == 64 && (m.url.starts_with("https://huggingface.co/") || m.url.starts_with("https://github.com/rhasspy/piper/") || m.url.starts_with("https://github.com/danielgatis/rembg/"))));
         let dir = std::env::temp_dir().join("cutkit-ai-test");
         let _ = std::fs::create_dir_all(&dir);
         let vad = model("vad-silero").unwrap();

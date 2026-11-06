@@ -56,6 +56,8 @@ pub struct Asset {
     pub proxy: Option<String>,
     /// PNG bentuk gelombang untuk ditampilkan di timeline.
     pub waveform: Option<String>,
+    /// Video punya kanal alpha (WebM VP9 hasil hapus background): perlu decoder libvpx.
+    pub alpha: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]

@@ -141,6 +141,16 @@ const commands = {
   list_templates: () => [],
   save_template: ({ name }) => path.join(CACHE, `${name}.json`),
   delete_template: () => null,
+  matting_status: () => ({ python_ready: fs.existsSync(path.join(MODELS_DIR, "py", "Scripts", "python.exe")) }),
+  matting_setup: () => null,
+  // Harness hanya memproses gambar dengan skrip yang sama (video diuji lewat tes Rust).
+  remove_bg: ({ path: p, kind, model, outPath }) => {
+    if (kind !== "image") throw new Error("Harness hanya mendukung gambar");
+    const file = { "matting-fast": "u2netp.onnx", "matting-best": "isnet-general-use.onnx" }[model];
+    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    execFileSync(path.join(MODELS_DIR, "py", "Scripts", "python.exe"), [path.join(MODELS_DIR, "cutkit-matting.py"), "image", path.join(MODELS_DIR, file), p, outPath]);
+    return outPath;
+  },
   open_path: () => null,
   reveal_path: () => null,
 };
