@@ -5,8 +5,8 @@
   "description": "CutKit: editor video ringan untuk Shorts 9:16, offline di komputermu",
   "license": "MIT",
   "scripts": {
-    "dev": "tauri dev",
-    "build": "tauri build",
+    "dev": "cargo build --release -p cutkit-cli && tauri dev",
+    "build": "cargo build --release -p cutkit-cli && tauri build",
     "test": "node --test tests/ && cargo test -p cutkit-core",
     "test:js": "node --test tests/",
     "icon": "tauri icon src-tauri/icons/icon.svg -o src-tauri/icons",
