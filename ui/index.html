@@ -1,1 +1,140 @@
-<!doctype html><title>CutKit</title>
+<!doctype html>
+<html lang="id" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CutKit</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo">Cut</span><span class="brand-name">Kit</span></div>
+    <div class="menu-wrap">
+      <button class="btn ghost" id="menu-btn">Proyek ▾</button>
+      <div class="menu hidden" id="project-menu">
+        <button data-cmd="new">Proyek baru…</button>
+        <button data-cmd="open">Buka proyek…</button>
+        <button data-cmd="save">Simpan <kbd>Ctrl+S</kbd></button>
+        <button data-cmd="saveas">Simpan sebagai…</button>
+        <hr>
+        <button data-cmd="reveal">Buka folder proyek</button>
+        <button data-cmd="shortcuts">Pintasan keyboard</button>
+      </div>
+    </div>
+    <input class="project-name" id="project-name" spellcheck="false" title="Nama proyek">
+    <span class="save-status" id="save-status"></span>
+    <div class="spacer"></div>
+    <button class="icon-btn" id="undo-btn" title="Urungkan (Ctrl+Z)" disabled>↶</button>
+    <button class="icon-btn" id="redo-btn" title="Ulangi (Ctrl+Y)" disabled>↷</button>
+    <select id="ratio-select" title="Rasio kanvas">
+      <option value="9:16">9:16 Shorts</option>
+      <option value="1:1">1:1</option>
+      <option value="4:5">4:5</option>
+      <option value="3:4">3:4</option>
+      <option value="16:9">16:9</option>
+    </select>
+    <button class="btn primary" id="export-btn">⇪ Ekspor</button>
+  </header>
+
+  <div class="banner hidden" id="ffmpeg-banner"></div>
+
+  <main class="workspace">
+    <aside class="panel left">
+      <nav class="tabs" id="left-tabs">
+        <button data-tab="media" class="active">Media</button>
+        <button data-tab="library">Pustaka</button>
+        <button data-tab="text">Teks</button>
+        <button data-tab="captions">Caption</button>
+      </nav>
+
+      <section class="tab-body" data-tab="media">
+        <div class="row gap">
+          <button class="btn primary" id="import-btn">＋ Impor</button>
+          <span class="hint">atau seret file ke jendela</span>
+        </div>
+        <div class="bin" id="media-bin"></div>
+      </section>
+
+      <section class="tab-body hidden" data-tab="library">
+        <div class="lib-places" id="lib-places"></div>
+        <div class="lib-path" id="lib-path"></div>
+        <input type="search" id="lib-search" placeholder="Cari di folder ini…">
+        <div class="lib-grid" id="lib-grid"></div>
+      </section>
+
+      <section class="tab-body hidden" data-tab="text">
+        <p class="hint">Klik untuk menambah teks di posisi playhead.</p>
+        <div class="presets" id="text-presets"></div>
+      </section>
+
+      <section class="tab-body hidden" data-tab="captions" id="captions-panel"></section>
+    </aside>
+
+    <section class="stage">
+      <div class="preview-area" id="preview-area">
+        <canvas id="preview"></canvas>
+        <div class="drop-hint hidden" id="drop-hint">Lepas untuk menambahkan</div>
+      </div>
+      <div class="transport">
+        <span class="tc" id="tc-now">00:00:00</span>
+        <span class="tc dim">/</span>
+        <span class="tc dim" id="tc-dur">00:00:00</span>
+        <div class="spacer"></div>
+        <button class="icon-btn" id="start-btn" title="Ke awal (Home)">⏮</button>
+        <button class="icon-btn" id="prev-frame" title="Mundur 1 frame (←)">◂</button>
+        <button class="icon-btn play" id="play-btn" title="Putar / jeda (Spasi)">▶</button>
+        <button class="icon-btn" id="next-frame" title="Maju 1 frame (→)">▸</button>
+        <button class="icon-btn" id="end-btn" title="Ke akhir (End)">⏭</button>
+        <div class="spacer"></div>
+        <button class="icon-btn" id="guides-btn" title="Garis bantu tengah">⌖</button>
+      </div>
+    </section>
+
+    <aside class="panel right" id="inspector"></aside>
+  </main>
+
+  <section class="timeline" id="timeline">
+    <div class="tl-toolbar">
+      <button class="icon-btn" id="split-btn" title="Potong di playhead (S / Ctrl+B)">✂</button>
+      <button class="icon-btn" id="trim-left-btn" title="Pangkas awal ke playhead (Q)">⇤</button>
+      <button class="icon-btn" id="trim-right-btn" title="Pangkas akhir ke playhead (W)">⇥</button>
+      <button class="icon-btn" id="delete-btn" title="Hapus (Delete). Shift+Delete: hapus dan tutup celah">🗑</button>
+      <button class="icon-btn" id="dup-btn" title="Duplikat (Ctrl+D)">⧉</button>
+      <span class="sep"></span>
+      <button class="btn ghost small" id="add-vtrack">＋ Track video</button>
+      <button class="btn ghost small" id="add-atrack">＋ Track audio</button>
+      <div class="spacer"></div>
+      <label class="toggle" title="Tempel ke tepi klip dan playhead (N). Tahan Alt untuk mematikan sementara"><input type="checkbox" id="snap-toggle" checked> Snap</label>
+      <button class="icon-btn" id="zoom-out" title="Perkecil (-)">−</button>
+      <input type="range" id="zoom" min="0" max="100" value="45" title="Zoom timeline (Ctrl+scroll)">
+      <button class="icon-btn" id="zoom-in" title="Perbesar (+)">＋</button>
+      <button class="btn ghost small" id="zoom-fit" title="Muat seluruh proyek">Muat</button>
+    </div>
+    <div class="tl-body">
+      <div class="tl-heads-col">
+        <div class="tl-corner"></div>
+        <div class="tl-heads" id="tl-heads"></div>
+      </div>
+      <div class="tl-scroll" id="tl-scroll">
+        <div class="tl-content" id="tl-content">
+          <canvas class="tl-ruler" id="tl-ruler"></canvas>
+          <div class="tl-rows" id="tl-rows"></div>
+          <div class="tl-playhead" id="tl-playhead"><span></span></div>
+          <div class="tl-snapline hidden" id="tl-snapline"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="modal hidden" id="modal"><div class="modal-box" id="modal-box"></div></div>
+  <div class="ghost-drag hidden" id="ghost-drag"></div>
+  <div class="toast hidden" id="toast"></div>
+
+  <script src="core/timeline.js"></script>
+  <script src="core/captions.js"></script>
+  <script src="core/geometry.js"></script>
+  <script src="preview.js"></script>
+  <script src="timeline-view.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
