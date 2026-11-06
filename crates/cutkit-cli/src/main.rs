@@ -422,8 +422,13 @@ fn uninstall(args: &Args, models: &Path) -> Result<Value, String> {
     }
     let data = std::env::var("LOCALAPPDATA").map(|d| Path::new(&d).join("io.github.taufan759.cutkit")).ok();
     if let Some(d) = &data {
-        for sub in ["proxy", "thumbs", "wave", "export", "EBWebView"] {
-            let _ = std::fs::remove_dir_all(d.join(sub));
+        for sub in ["proxy", "thumbs", "wave", "tts", "export", "EBWebView"] {
+            let p = d.join(sub);
+            if p.exists() {
+                if let Err(e) = std::fs::remove_dir_all(&p) {
+                    eprintln!("Tidak bisa menghapus {}: {e}", p.display());
+                }
+            }
         }
     }
     let mut models_removed = false;
