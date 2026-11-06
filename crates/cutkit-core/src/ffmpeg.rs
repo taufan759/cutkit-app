@@ -123,6 +123,73 @@ fn tail(stderr: &str) -> String {
     }
 }
 
+/// Argumen winget untuk memasang ffmpeg (build Gyan, punya libx264, libass, flite) untuk user ini saja.
+pub fn winget_install_args() -> Vec<String> {
+    ["install", "--id", "Gyan.FFmpeg", "--exact", "--source", "winget", "--scope", "user", "--silent", "--disable-interactivity", "--accept-package-agreements", "--accept-source-agreements"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
+pub fn has_winget() -> bool {
+    quiet(Command::new("winget").arg("--version")).stdin(Stdio::null()).output().map(|o| o.status.success()).unwrap_or(false)
+}
+
+/// Memasang ffmpeg lewat winget; tiap baris keluaran diteruskan ke `on_line`.
+pub fn install_ffmpeg(mut on_line: impl FnMut(String)) -> Result<(), String> {
+    if !has_winget() {
+        return Err("winget tidak tersedia. Pasang \"App Installer\" dari Microsoft Store, atau unduh ffmpeg manual dari gyan.dev.".into());
+    }
+    let mut child = quiet(Command::new("winget").args(winget_install_args()))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("winget gagal dijalankan: {e}"))?;
+    let stdout = child.stdout.take().expect("stdout");
+    let mut stderr = child.stderr.take().expect("stderr");
+    let err_reader = std::thread::spawn(move || {
+        let mut s = String::new();
+        let _ = stderr.read_to_string(&mut s);
+        s
+    });
+    // winget menimpa baris progres dengan \r; dipecah supaya tiap pembaruan terkirim.
+    let mut buf = Vec::new();
+    for byte in BufReader::new(stdout).bytes() {
+        let Ok(b) = byte else { break };
+        if b == b'\n' || b == b'\r' {
+            let line = String::from_utf8_lossy(&buf).trim().to_string();
+            buf.clear();
+            if line.chars().any(|c| c.is_alphanumeric()) {
+                on_line(line);
+            }
+        } else {
+            buf.push(b);
+        }
+    }
+    let status = child.wait().map_err(|e| e.to_string())?;
+    let err = err_reader.join().unwrap_or_default();
+    // Kode -1978335189 (0x8A15002B) = sudah terpasang versi terbaru; anggap berhasil.
+    if status.success() || status.code() == Some(-1978335189) {
+        Ok(())
+    } else {
+        Err(format!("winget berhenti dengan kode {:?}. {}", status.code(), err.trim()))
+    }
+}
+
+/// Total ukuran file dalam folder (rekursif), untuk info cache.
+pub fn dir_size(path: &Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(path) else { return 0 };
+    entries
+        .flatten()
+        .map(|e| match e.metadata() {
+            Ok(m) if m.is_dir() => dir_size(&e.path()),
+            Ok(m) => m.len(),
+            Err(_) => 0,
+        })
+        .sum()
+}
+
 #[derive(Serialize, Clone, Debug, Default)]
 pub struct Progress {
     pub seconds: f64,

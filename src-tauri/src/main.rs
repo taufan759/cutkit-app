@@ -185,10 +185,10 @@ struct DirEntry {
     is_dir: bool,
 }
 
-/// Isi folder untuk panel pustaka (hanya media yang dikenal + subfolder).
+/// Isi folder untuk panel pustaka dan wizard (media yang dikenal, caption .srt/.json, dan subfolder).
 #[tauri::command]
 fn list_dir(path: String) -> Result<Vec<DirEntry>, String> {
-    const EXT: &[&str] = &["mp4", "mov", "mkv", "webm", "avi", "m4v", "gif", "png", "jpg", "jpeg", "webp", "bmp", "mp3", "wav", "m4a", "aac", "ogg", "opus", "flac", "wma"];
+    const EXT: &[&str] = &["mp4", "mov", "mkv", "webm", "avi", "m4v", "gif", "png", "jpg", "jpeg", "webp", "bmp", "mp3", "wav", "m4a", "aac", "ogg", "opus", "flac", "wma", "srt", "json"];
     let mut out = vec![];
     for e in std::fs::read_dir(&path).map_err(|e| format!("Folder tidak bisa dibuka: {e}"))?.flatten() {
         let p = e.path();
@@ -261,6 +261,67 @@ fn export_preview_command(project: Project, options: ExportOptions) -> Result<se
     Ok(serde_json::json!({ "args": plan.args, "filter": plan.filter_script, "ass": plan.ass }))
 }
 
+#[derive(Serialize)]
+struct SystemInfo {
+    tools: Option<Tools>,
+    winget: bool,
+    cache_dir: String,
+    cache_bytes: u64,
+}
+
+/// Cek sistem untuk pemula: ffmpeg, Quick Sync, winget, dan ukuran cache.
+#[tauri::command]
+async fn system_info(state: State<'_, AppState>) -> Result<SystemInfo, String> {
+    let tools = state.tools().ok();
+    let cache = state.cache_dir.clone();
+    blocking(move || {
+        let tools = tools.map(|mut t| {
+            t.has_qsv = ffmpeg::check_qsv(&t.ffmpeg);
+            t
+        });
+        Ok(SystemInfo { tools, winget: ffmpeg::has_winget(), cache_bytes: ffmpeg::dir_size(&cache), cache_dir: cache.to_string_lossy().to_string() })
+    })
+    .await
+}
+
+/// Menghapus proxy, gambar mini, dan gelombang. Semuanya dibuat ulang saat dibutuhkan.
+#[tauri::command]
+fn clear_cache(state: State<AppState>) -> Result<u64, String> {
+    let before = ffmpeg::dir_size(&state.cache_dir);
+    for sub in ["proxy", "thumbs", "wave", "export"] {
+        let _ = std::fs::remove_dir_all(state.cache_dir.join(sub));
+    }
+    Ok(before.saturating_sub(ffmpeg::dir_size(&state.cache_dir)))
+}
+
+/// Memasang ffmpeg lewat winget; log dikirim lewat event `setup-log`.
+#[tauri::command]
+async fn install_ffmpeg(app: AppHandle, state: State<'_, AppState>) -> Result<Tools, String> {
+    let app2 = app.clone();
+    blocking(move || ffmpeg::install_ffmpeg(|line| { let _ = app2.emit("setup-log", line); })).await?;
+    let mut guard = state.tools.lock().map_err(|e| e.to_string())?;
+    *guard = ffmpeg::find_tools(None);
+    guard.clone().ok_or_else(|| "ffmpeg sudah dipasang tapi belum ditemukan. Tutup lalu buka ulang CutKit.".to_string())
+}
+
+/// Membuat media untuk proyek contoh di folder `dir`.
+#[tauri::command]
+async fn make_demo(dir: String, state: State<'_, AppState>) -> Result<cutkit_core::demo::DemoMedia, String> {
+    let tools = state.tools()?;
+    blocking(move || {
+        let dir = PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let (media, jobs) = cutkit_core::demo::demo_jobs(&dir);
+        for (out, args) in jobs {
+            if !Path::new(&out).is_file() {
+                ffmpeg::run(&tools.ffmpeg, &args)?;
+            }
+        }
+        Ok(media)
+    })
+    .await
+}
+
 #[tauri::command]
 fn open_path(app: AppHandle, path: String) -> Result<(), String> {
     app.opener().open_path(path, None::<&str>).map_err(|e| e.to_string())
@@ -295,6 +356,10 @@ fn main() {
             export_start,
             export_cancel,
             export_preview_command,
+            system_info,
+            clear_cache,
+            install_ffmpeg,
+            make_demo,
             open_path,
             reveal_path
         ])
