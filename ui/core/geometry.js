@@ -103,5 +103,31 @@
     return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) || 0);
   }
 
-  return { place, hitTest, corners, rround, motionAt, motionActive, motionRect, MOTIONS, colorKey, hexToRgb };
+  /** Easing smoothstep, sama dengan ekspresi ffmpeg di export.rs. */
+  function ease(e) { e = Math.min(1, Math.max(0, e)); return e * e * (3 - 2 * e); }
+
+  /**
+   * Efek transisi di waktu t: { alpha, dx, dy } (dx/dy dalam piksel kanvas).
+   * `incoming` = transisi klip ini; `outgoing` = transisi klip berikutnya (untuk push).
+   */
+  function transitionAt(t, start, incoming, outgoing, outgoingStart, cw, ch) {
+    let alpha = 1, dx = 0, dy = 0;
+    if (incoming && incoming.kind !== "none") {
+      const e = ease((t - start) / Math.max(0.001, incoming.duration));
+      switch (incoming.kind) {
+        case "fade": alpha = e; break;
+        case "slide-left": case "push-left": dx = cw * (1 - e); break;
+        case "slide-right": case "push-right": dx = -cw * (1 - e); break;
+        case "slide-up": dy = ch * (1 - e); break;
+        case "slide-down": dy = -ch * (1 - e); break;
+      }
+    }
+    if (outgoing && outgoing.kind.startsWith("push")) {
+      const e = ease((t - outgoingStart) / Math.max(0.001, outgoing.duration));
+      dx += outgoing.kind === "push-left" ? -cw * e : cw * e;
+    }
+    return { alpha, dx, dy };
+  }
+
+  return { ease, transitionAt, place, hitTest, corners, rround, motionAt, motionActive, motionRect, MOTIONS, colorKey, hexToRgb };
 });

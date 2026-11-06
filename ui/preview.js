@@ -371,8 +371,12 @@
 
       p.tracks.forEach((track, ti) => {
         if (track.kind !== "video" || track.hidden) return;
-        for (const clip of track.clips) {
+        for (const [ci, clip] of track.clips.entries()) {
           if (!(t >= clip.start && t < TL.clipEnd(clip))) continue;
+          const next = track.clips[ci + 1];
+          const incoming = ci > 0 && TL.transitionActive(clip) ? clip.transition : null;
+          const outgoing = next && TL.transitionActive(next) && next.start < TL.clipEnd(clip) - 1e-6 ? next.transition : null;
+          const tr = GEO.transitionAt(t, clip.start, incoming, outgoing, next ? next.start : 0, p.canvas.width, p.canvas.height);
           if (clip.kind === "text") { textJobs.push({ clip, ti }); continue; }
           const asset = TL.getAsset(p, clip.asset_id);
           if (!asset) continue;
@@ -393,6 +397,7 @@
             const sh = source.videoHeight || source.naturalHeight || 1;
             const r = Math.max(4, Math.round(Math.min(p.canvas.width, p.canvas.height) / 27));
             ctx.save();
+            ctx.globalAlpha = tr.alpha;
             ctx.filter = `blur(${(r * 0.8 * k).toFixed(1)}px)`;
             // Digambar lebih besar 3r di tiap sisi: blur canvas mengambil piksel transparan di luar tepi,
             // sedangkan boxblur ffmpeg menjepit tepi; tanpa ini pinggiran preview menggelap.
@@ -406,8 +411,8 @@
           }
           if (source && clip.chroma && clip.chroma.enabled) source = this._keyed(clip, source, pl, k);
           ctx.save();
-          ctx.globalAlpha = Math.max(0, Math.min(1, clip.transform.opacity));
-          ctx.translate(pl.cx, pl.cy);
+          ctx.globalAlpha = Math.max(0, Math.min(1, clip.transform.opacity)) * tr.alpha;
+          ctx.translate(pl.cx + tr.dx, pl.cy + tr.dy);
           ctx.rotate(pl.rad);
           if (source && GEO.motionActive(clip.motion)) {
             const sw = source.videoWidth || source.naturalWidth || source.width || pl.w;

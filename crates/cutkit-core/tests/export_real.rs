@@ -276,3 +276,46 @@ fn long_project_exports_in_parts() {
     assert!((before - after).abs() < 12, "zoom melompat di batas bagian: {before} -> {after}");
     assert!((after - start).abs() > 12, "zoom tidak berjalan: awal {start}, detik 16 {after}");
 }
+
+#[test]
+fn transitions_render_between_clips() {
+    let Some(tools) = find_tools(None) else {
+        eprintln!("ffmpeg tidak ditemukan, tes transisi dilewati");
+        return;
+    };
+    let dir = tmp_dir("transisi");
+    let s = |p: &PathBuf| p.to_string_lossy().to_string();
+    let mk = |name: &str, color: &str| {
+        let out = dir.join(name);
+        run(&tools.ffmpeg, &["-hide_banner", "-y", "-loglevel", "error", "-f", "lavfi", "-i", &format!("color=c={color}:s=160x90:r=30:d=4"), "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", &s(&out)].map(String::from)).unwrap();
+        out
+    };
+    let red = mk("merah.mp4", "red");
+    let blue = mk("biru.mp4", "blue");
+    let mut p = Project::new("transisi");
+    p.canvas = Canvas { width: 320, height: 180, fps: 30.0, background: "#000000".into() };
+    for (id, path) in [("r", &red), ("b", &blue)] {
+        p.assets.push(Asset { id: id.into(), path: s(path), kind: AssetKind::Video, duration: 4.0, width: 160, height: 90, has_video: true, ..Default::default() });
+    }
+    // Merah 0-3 detik, biru menumpuk 1 detik (mulai 2) dengan crossfade, lalu biru ke merah dengan dorong ke kiri.
+    p.tracks[0].clips.push(Clip { id: "a".into(), asset_id: Some("r".into()), start: 0.0, duration: 3.0, ..Default::default() });
+    p.tracks[0].clips.push(Clip { id: "b".into(), asset_id: Some("b".into()), start: 2.0, duration: 3.0, transition: Transition { kind: "fade".into(), duration: 1.0 }, ..Default::default() });
+    p.tracks[0].clips.push(Clip { id: "c".into(), asset_id: Some("r".into()), start: 4.0, duration: 2.0, transition: Transition { kind: "push-left".into(), duration: 1.0 }, ..Default::default() });
+    let out = dir.join("transisi.mp4");
+    let plan = build_plan(&p, &ExportOptions { output: s(&out), quality: Quality::Fast, ..Default::default() }).unwrap();
+    run_export(&tools.ffmpeg, &dir.join("kerja"), &plan, Arc::new(AtomicBool::new(false)), |_| {}).expect("ekspor transisi");
+    let o = s(&out);
+    let before = pixel(&tools.ffmpeg, &o, 1.5, 160, 90);
+    let mid = pixel(&tools.ffmpeg, &o, 2.5, 160, 90);
+    let after = pixel(&tools.ffmpeg, &o, 3.5, 160, 90);
+    assert!(before[0] > 200 && before[2] < 60, "sebelum transisi merah: {before:?}");
+    assert!(mid[0] > 70 && mid[2] > 70, "tengah crossfade campuran merah-biru: {mid:?}");
+    assert!(after[2] > 200 && after[0] < 60, "sesudah transisi biru: {after:?}");
+    // Dorong di detik 4.5 (tengah): biru terdorong ke kiri, merah masuk dari kanan.
+    let left = pixel(&tools.ffmpeg, &o, 4.5, 40, 90);
+    let right = pixel(&tools.ffmpeg, &o, 4.5, 280, 90);
+    assert!(left[2] > 200 && left[0] < 60, "kiri masih biru: {left:?}");
+    assert!(right[0] > 200 && right[2] < 60, "kanan sudah merah: {right:?}");
+    let info = probe(&tools.ffprobe, &o).unwrap();
+    assert!((info.duration - 6.0).abs() < 0.15, "durasi {}", info.duration);
+}

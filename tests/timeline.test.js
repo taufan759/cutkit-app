@@ -326,3 +326,44 @@ test("autoAssemble memotong gambar di ketukan musik", () => {
   T.autoAssemble(p, { voice: { id: "vo", kind: "audio", duration: 9, has_audio: true }, visuals: vis, beats: [2.6, 3.2, 5.9, 6.4] });
   assert.deepEqual(p.tracks[0].clips.map((c) => c.start), [0, 3.2, 5.9]);
 });
+
+test("transisi: klip maju menumpuk, pangkas/hapus/lepas menjaga urutan", () => {
+  const { p, c1, c2 } = setup();
+  const c3 = T.insertClip(p, "v1", T.clipFromAsset(p.assets[1]));
+  assert.equal(c3.start, 20);
+  T.setTransition(p, c2.id, "fade", 1);
+  assert.equal(c2.start, 9, "maju menumpuk 1 detik");
+  assert.equal(c3.start, 19, "klip sesudahnya ikut maju");
+  assert.equal(T.duration(p), 22);
+  T.setTransition(p, c2.id, "push-left", 2);
+  assert.equal(c2.start, 8);
+  assert.equal(c2.transition.duration, 2);
+  // Pangkas akhir klip pertama tidak boleh melewati ujung tumpukan (c2.start + 2 = 10).
+  T.trimClip(p, c1.id, "end", 15);
+  assert.equal(T.clipEnd(c1), 10);
+  // Pangkas awal c2 tidak boleh mundur melewati c1.end - transisi.
+  T.trimClip(p, c2.id, "start", 0);
+  assert.equal(c2.start, 8);
+  // Lepas transisi: kembali ke ujung c1.
+  T.setTransition(p, c2.id, "none");
+  assert.equal(c2.start, 10);
+  assert.equal(c3.start, 20);
+  // Transisi lagi lalu hapus c1: c2 kembali ke posisi tanpa tumpukan.
+  T.setTransition(p, c2.id, "slide-up", 0.5);
+  T.deleteClip(p, c1.id);
+  assert.equal(c2.transition.kind, "none");
+  assert.equal(c2.start, 10);
+  assert.throws(() => T.setTransition(p, c2.id, "fade", 1), /menempel/);
+});
+
+test("transisi dibatasi setengah durasi klip dan tidak bisa di klip audio", () => {
+  const { p, c1, c2 } = setup();
+  T.trimClip(p, c1.id, "end", 1);
+  T.moveClip(p, c2.id, 1);
+  T.setTransition(p, c2.id, "fade", 3);
+  assert.equal(c2.transition.duration, 0.5, "maks setengah klip sebelumnya (1 detik)");
+  const a = T.insertClip(p, "a1", T.clipFromAsset(p.assets[2]), 0);
+  assert.throws(() => T.setTransition(p, a.id, "fade", 1), /video dan gambar/);
+  T.closeGaps(p, "v1");
+  assert.equal(c2.start, 0.5, "tutup celah mempertahankan tumpukan");
+});

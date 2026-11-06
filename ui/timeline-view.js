@@ -217,6 +217,9 @@
           node.append(el("div", { class: "beat" + (down.has(b) ? " down" : ""), style: `left:${this.timeToX((b - clip.in) / sp)}px` }));
         }
       }
+      if (TL.transitionActive(clip)) {
+        node.append(el("div", { class: "trans", title: `Transisi ${clip.transition.kind} ${clip.transition.duration} s`, style: `width:${Math.max(8, this.timeToX(clip.transition.duration))}px` }, "⧓"));
+      }
       if (clip.fade_in > 0) node.append(el("div", { class: "fade in", style: `width:${this.timeToX(clip.fade_in)}px` }));
       if (clip.fade_out > 0) node.append(el("div", { class: "fade out", style: `width:${this.timeToX(clip.fade_out)}px` }));
       node.append(el("div", { class: "h-l", title: "Pangkas awal" }), el("div", { class: "h-r", title: "Pangkas akhir" }));

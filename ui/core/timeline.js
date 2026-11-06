@@ -123,6 +123,7 @@
     c.motion = Object.assign({ kind: "none", amount: 0.15 }, c.motion || {});
     c.background = c.background === "blur" ? "blur" : "none";
     c.chroma = Object.assign({ enabled: false, color: "#00ff00", similarity: 0.3, blend: 0.1 }, c.chroma || {});
+    c.transition = Object.assign({ kind: "none", duration: 0.5 }, c.transition || {});
     if (c.kind === "text") {
       c.text = c.text || { text: "", style: defaultTextStyle() };
       c.text.style = Object.assign(defaultTextStyle(), c.text.style || {});
@@ -183,7 +184,49 @@
   }
 
   function overlaps(track, start, end, ignoreId) {
-    return track.clips.some((c) => c.id !== ignoreId && start < clipEnd(c) - EPS && end > c.start + EPS);
+    const self = ignoreId ? track.clips.find((c) => c.id === ignoreId) : null;
+    const allow = self && transitionActive(self) && Math.abs(start - self.start) < EPS ? self.transition.duration : 0;
+    return track.clips.some((c) => {
+      if (c.id === ignoreId) return false;
+      // Klip berikutnya yang bertransisi boleh menumpuk ujung klip ini.
+      const nextAllow = transitionActive(c) && c.start > start && Math.abs(c.start - (end - c.transition.duration)) < EPS ? c.transition.duration : 0;
+      const overlap = Math.min(end, clipEnd(c)) - Math.max(start, c.start);
+      return overlap > EPS + Math.max(c.start < start ? allow : 0, nextAllow);
+    });
+  }
+
+  const TRANSITIONS = ["none", "fade", "slide-left", "slide-right", "slide-up", "slide-down", "push-left", "push-right"];
+  function transitionActive(c) { return !!c.transition && c.transition.kind !== "none" && TRANSITIONS.includes(c.transition.kind) && c.transition.duration > 0; }
+
+  /** Klip tepat sebelum `clip` di track (berdasarkan waktu mulai). */
+  function previousClip(track, clip) {
+    let prev = null;
+    for (const c of track.clips) if (c !== clip && c.start < clip.start - EPS && (!prev || c.start > prev.start)) prev = c;
+    return prev;
+  }
+
+  /**
+   * Memasang transisi masuk ke klip dari klip sebelumnya yang bersambung. Klip ini dan semua
+   * sesudahnya di track maju menumpuk klip sebelumnya sepanjang durasi transisi (seperti CapCut).
+   * kind "none" melepas transisi dan mengembalikan posisi.
+   */
+  function setTransition(p, clipId, kind, duration) {
+    const { track, clip } = mustFind(p, clipId);
+    if (clip.kind === "audio" || clip.kind === "text") throw new Error("Transisi hanya untuk klip video dan gambar.");
+    if (!TRANSITIONS.includes(kind)) throw new Error("Jenis transisi tidak dikenal.");
+    const prev = previousClip(track, clip);
+    const old = transitionActive(clip) ? clip.transition.duration : 0;
+    if (kind !== "none") {
+      if (!prev || Math.abs(clipEnd(prev) - old - clip.start) > 0.02) throw new Error("Transisi butuh klip sebelumnya yang menempel langsung di track yang sama.");
+    }
+    let d = kind === "none" ? 0 : clamp(+duration || 0.5, 0.1, 3);
+    if (prev) d = Math.min(d, prev.duration / 2, clip.duration / 2);
+    const delta = d - old; // positif = maju menumpuk
+    const from = clip.start;
+    for (const c of track.clips) if (c.start >= from - EPS) c.start = round(c.start - delta);
+    clip.transition = { kind, duration: round(kind === "none" ? 0.5 : d) };
+    sortClips(track);
+    return clip;
   }
 
   /**
@@ -330,8 +373,10 @@
    */
   function trimClip(p, clipId, edge, time) {
     const { track, clip } = mustFind(p, clipId);
-    const prevEnd = track.clips.filter((c) => c.id !== clip.id && clipEnd(c) <= clip.start + EPS).reduce((m, c) => Math.max(m, clipEnd(c)), 0);
-    const nextStart = track.clips.filter((c) => c.id !== clip.id && c.start >= clipEnd(clip) - EPS).reduce((m, c) => Math.min(m, c.start), Infinity);
+    const prevClip = previousClip(track, clip);
+    const nextClip = track.clips.filter((c) => c !== clip && c.start > clip.start + EPS).reduce((m, c) => (!m || c.start < m.start ? c : m), null);
+    const prevEnd = prevClip ? clipEnd(prevClip) - (transitionActive(clip) ? clip.transition.duration : 0) : 0;
+    const nextStart = nextClip ? nextClip.start + (transitionActive(nextClip) ? nextClip.transition.duration : 0) : Infinity;
     const timed = clip.kind === "video" || clip.kind === "audio";
     const sp = speedOf(clip);
     if (edge === "start") {
@@ -368,6 +413,9 @@
       if (t && trackAccepts(t, found.clip)) target = t;
     }
     const clip = found.clip;
+    if (transitionActive(clip) && Math.abs(start - clip.start) > EPS) clip.transition = { kind: "none", duration: 0.5 };
+    const follower = found.track.clips.find((c) => c !== clip && transitionActive(c) && previousClip(found.track, c) === clip);
+    if (follower && (Math.abs(start - clip.start) > EPS || target !== found.track)) follower.transition = { kind: "none", duration: 0.5 };
     if (target !== found.track) {
       found.track.clips.splice(found.index, 1);
       target.clips.push(clip);
@@ -380,7 +428,15 @@
   /** Menghapus klip. `ripple` menggeser klip setelahnya di track yang sama untuk menutup celah. */
   function deleteClip(p, clipId, ripple = false) {
     const { track, clip, index } = mustFind(p, clipId);
-    track.clips.splice(index, 1);
+    const follower = track.clips.find((c) => c !== clip && transitionActive(c) && previousClip(track, c) === clip);
+    if (follower) {
+      // Tumpukan dilepas: klip sesudahnya kembali ke ujung klip yang dihapus.
+      const d = follower.transition.duration;
+      follower.transition = { kind: "none", duration: 0.5 };
+      for (const c of track.clips) if (c.start >= follower.start - EPS) c.start = round(c.start + d);
+    }
+    track.clips.splice(track.clips.indexOf(clip), 1);
+    void index;
     if (ripple) {
       for (const c of track.clips) if (c.start >= clipEnd(clip) - EPS) c.start = round(c.start - clip.duration);
     }
@@ -408,10 +464,11 @@
     if (!t) return;
     sortClips(t);
     let pos = 0;
-    for (const c of t.clips) {
-      c.start = round(pos);
-      pos += c.duration;
-    }
+    t.clips.forEach((c, i) => {
+      const back = i > 0 && transitionActive(c) ? c.transition.duration : 0;
+      c.start = round(pos - back);
+      pos = c.start + c.duration;
+    });
   }
 
   /** Mengubah properti klip; nilai dijaga dalam batas yang masuk akal. */
@@ -699,7 +756,7 @@
   }
 
   return {
-    allocate, snapCuts, autoAssemble, beatTimes, syncToBeats, speedOf, sourceTime, setSpeed,
+    allocate, snapCuts, autoAssemble, beatTimes, syncToBeats, setTransition, transitionActive, previousClip, TRANSITIONS, speedOf, sourceTime, setSpeed,
     MIN_DURATION, STILL_DURATION, RATIOS, RATIO_LABELS, styleScale,
     uid, newProject, normalize, normalizeClip, defaultTextStyle, defaultCaptionStyle, defaultTransform,
     clipEnd, duration, getTrack, getAsset, findClip, trackAccepts, overlaps, findFreeStart,

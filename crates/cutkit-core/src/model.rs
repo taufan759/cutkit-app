@@ -121,6 +121,9 @@ pub struct Clip {
     pub background: String,
     /// Hapus warna latar (green screen).
     pub chroma: Chroma,
+    /// Transisi masuk dari klip sebelumnya di track yang sama; klip ini menumpuk klip
+    /// sebelumnya selama `duration` detik.
+    pub transition: Transition,
     pub text: Option<TextClip>,
     /// Hanya saat ekspor bertahap: detik sejak awal klip asli (klip terpotong di batas bagian).
     #[serde(skip)]
@@ -149,6 +152,7 @@ impl Default for Clip {
             motion: Motion::default(),
             background: "none".into(),
             chroma: Chroma::default(),
+            transition: Transition::default(),
             text: None,
             offset: 0.0,
             span: 0.0,
@@ -191,6 +195,27 @@ pub struct Transform {
 impl Default for Transform {
     fn default() -> Self {
         Transform { x: 0.0, y: 0.0, scale: 1.0, rotation: 0.0, opacity: 1.0 }
+    }
+}
+
+/// Jenis: none, fade, slide-left, slide-right, slide-up, slide-down, push-left, push-right.
+/// "slide-left" = klip baru masuk dari kanan bergerak ke kiri; "push" juga mendorong klip lama keluar.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct Transition {
+    pub kind: String,
+    pub duration: f64,
+}
+
+impl Default for Transition {
+    fn default() -> Self {
+        Transition { kind: "none".into(), duration: 0.5 }
+    }
+}
+
+impl Transition {
+    pub fn is_active(&self) -> bool {
+        matches!(self.kind.as_str(), "fade" | "slide-left" | "slide-right" | "slide-up" | "slide-down" | "push-left" | "push-right") && self.duration > 0.0
     }
 }
 

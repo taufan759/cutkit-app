@@ -11,7 +11,7 @@
 
 use crate::ass;
 use crate::layout::{place, Placement};
-use crate::model::{AssetKind, ClipKind, Motion, Project, TrackKind};
+use crate::model::{AssetKind, ClipKind, Motion, Project, TrackKind, Transition};
 use serde::{Deserialize, Serialize};
 
 pub const FILTER_FILE: &str = "cutkit-filter.txt";
@@ -97,6 +97,40 @@ struct Visual {
     end: f64,
     place: Placement,
     opacity: f64,
+    /// Transisi masuk: (jenis, durasi, waktu timeline awal transisi di pass ini).
+    t_in: Option<(String, f64, f64)>,
+    /// Didorong keluar oleh klip berikutnya (push): (jenis, durasi, waktu mulai).
+    t_out: Option<(String, f64, f64)>,
+}
+
+/// Ekspresi easing halus (smoothstep) dari kemajuan transisi di waktu `t`.
+fn ease_expr(start: f64, dur: f64) -> String {
+    format!("st(0,clip((t-{})/{},0,1));ld(0)*ld(0)*(3-2*ld(0))", f(start), f(dur.max(0.001)))
+}
+
+/// Ekspresi posisi overlay x dan y untuk transisi masuk/keluar (geser/dorong).
+fn overlay_xy(p: &Placement, w: u32, h: u32, t_in: &Option<(String, f64, f64)>, t_out: &Option<(String, f64, f64)>) -> (String, String) {
+    let mut x = format!("{}", p.x);
+    let mut y = format!("{}", p.y);
+    if let Some((kind, d, s)) = t_in {
+        let e = ease_expr(*s, *d);
+        match kind.as_str() {
+            "slide-left" | "push-left" => x = format!("{}+{w}*(1-({e}))", p.x),
+            "slide-right" | "push-right" => x = format!("{}-{w}*(1-({e}))", p.x),
+            "slide-up" => y = format!("{}+{h}*(1-({e}))", p.y),
+            "slide-down" => y = format!("{}-{h}*(1-({e}))", p.y),
+            _ => {}
+        }
+    }
+    if let Some((kind, d, s)) = t_out {
+        let e = ease_expr(*s, *d);
+        match kind.as_str() {
+            "push-left" => x = format!("{x}-{w}*({e})"),
+            "push-right" => x = format!("{x}+{w}*({e})"),
+            _ => {}
+        }
+    }
+    (x, y)
 }
 
 struct AudioSrc {
@@ -177,10 +211,14 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String), S
     for track in &project.tracks {
         let mut clips: Vec<_> = track.clips.iter().filter(|c| c.duration > 0.0).collect();
         clips.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap());
-        for clip in clips {
+        for (ci, clip) in clips.iter().enumerate() {
+            let clip = *clip;
             if clip.kind == ClipKind::Text {
                 continue;
             }
+            // Transisi masuk aktif bila klip ini menumpuk klip sebelumnya; klip berikutnya bisa mendorong klip ini keluar.
+            let incoming: Option<&Transition> = Some(&clip.transition).filter(|t| t.is_active() && ci > 0);
+            let next = clips.get(ci + 1).copied().filter(|n| n.transition.is_active() && n.start < clip.end() - 1e-6);
             let Some(asset) = clip.asset_id.as_deref().and_then(|id| project.asset(id)) else {
                 return Err(format!("Klip {} merujuk ke media yang tidak ada di proyek.", clip.id));
             };
@@ -223,17 +261,23 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String), S
                     let (r, g, b, _) = crate::ass::parse_color(&clip.chroma.color);
                     format!("0x{r:02x}{g:02x}{b:02x}:{}:{}", f(clip.chroma.similarity.clamp(0.01, 1.0)), f(clip.chroma.blend.clamp(0.0, 1.0)))
                 });
-                visuals.push(Visual { input, blur_bg: clip.background == "blur", colorkey, speed, motion, start: clip.start, end: clip.end(), place: pl, opacity: clip.transform.opacity.clamp(0.0, 1.0) });
+                // Awal transisi di waktu pass ini (bisa negatif bila klip terpotong di batas bagian).
+                let t_in = incoming.map(|t| (t.kind.clone(), t.duration, clip.start - clip.offset));
+                let t_out = next.filter(|n| n.transition.kind.starts_with("push")).map(|n| (n.transition.kind.clone(), n.transition.duration, n.start - n.offset));
+                visuals.push(Visual { input, blur_bg: clip.background == "blur", colorkey, speed, motion, start: clip.start, end: clip.end(), place: pl, opacity: clip.transform.opacity.clamp(0.0, 1.0), t_in, t_out });
             }
             if want_audio {
+                // Selama transisi suara ikut crossfade: klip baru masuk pelan, klip lama keluar pelan.
+                let x_in = incoming.map(|t| t.duration).unwrap_or(0.0);
+                let x_out = next.map(|n| clip.end() - n.start).unwrap_or(0.0);
                 audios.push(AudioSrc {
                     input,
                     speed: clip.effective_speed(),
                     duration: clip.duration,
                     start: clip.start,
                     volume: clip.volume,
-                    fade_in: clip.fade_in.min(clip.duration),
-                    fade_out: clip.fade_out.min(clip.duration),
+                    fade_in: clip.fade_in.max(x_in).min(clip.duration),
+                    fade_out: clip.fade_out.max(x_out).min(clip.duration),
                 });
             }
         }
@@ -258,6 +302,14 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String), S
                 g.push(format!(
                     "[q{i}]format=rgba,scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},boxblur={blur_radius}:2,{pts}[l{i}]"
                 ));
+                let fade_bg = match &v.t_in {
+                    Some((k, d, s)) if k == "fade" => format!(",fade=t=in:st={}:d={}:alpha=1", f(*s), f(*d)),
+                    _ => String::new(),
+                };
+                if !fade_bg.is_empty() {
+                    let last = g.pop().unwrap();
+                    g.push(last.replace(&format!("[l{i}]"), &format!("{fade_bg}[l{i}]")));
+                }
                 g.push(format!("[b{i}][l{i}]overlay=x=0:y=0:format=rgb:eof_action=pass:enable='between(t,{},{})'[k{i}]", f(v.start), f(v.end)));
                 base = format!("[k{i}]");
                 src = format!("[s{i}]");
@@ -288,12 +340,20 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String), S
             if v.opacity < 0.999 {
                 chain.push_str(&format!(",colorchannelmixer=aa={}", f(v.opacity)));
             }
-            chain.push_str(&format!(",{pts}[v{i}]"));
+            chain.push_str(&format!(",{pts}"));
+            if let Some((k, d, s)) = &v.t_in {
+                if k == "fade" {
+                    chain.push_str(&format!(",fade=t=in:st={}:d={}:alpha=1", f(*s), f(*d)));
+                }
+            }
+            chain.push_str(&format!("[v{i}]"));
             g.push(chain);
+            let (ox, oy) = overlay_xy(p, w, h, &v.t_in, &v.t_out);
+            let quote = |e: String| if e.contains('(') { format!("'{e}'") } else { e };
             g.push(format!(
                 "{base}[v{i}]overlay=x={}:y={}:format=rgb:eof_action=pass:enable='between(t,{},{})'[b{}]",
-                p.x,
-                p.y,
+                quote(ox),
+                quote(oy),
                 f(v.start),
                 f(v.end),
                 i + 1
@@ -800,6 +860,29 @@ mod tests {
         assert!(concat.contains("-f concat -safe 0 -i cutkit-parts.txt -i cutkit-audio.wav -map 0:v:0 -map 1:a:0 -c:v copy -af loudnorm"));
         assert!(concat.ends_with("-movflags +faststart -t 200 D:/out/hasil.mp4"));
         assert_eq!(job.steps[4].files[0].1, "file 'cutkit-part-0.mkv'\nfile 'cutkit-part-1.mkv'\nfile 'cutkit-part-2.mkv'\n");
+    }
+
+    #[test]
+    fn transitions_overlap_and_animate() {
+        let mut p = project();
+        // Klip video kedua menumpuk 0,5 detik dengan crossfade, gambar di track lain tidak terpengaruh.
+        p.tracks[0].clips.push(Clip { id: "c2".into(), asset_id: Some("vid".into()), start: 3.5, duration: 3.0, transition: Transition { kind: "fade".into(), duration: 0.5 }, ..Default::default() });
+        let g = build_plan(&p, &opts()).unwrap().filter_script;
+        assert!(g.contains("setpts=PTS-STARTPTS+3.5/TB,fade=t=in:st=3.5:d=0.5:alpha=1[v1]"), "{g}");
+        // Audio crossfade: klip baru masuk 0,5 detik; klip lama memakai fade out terpanjang (bawaannya 1 detik).
+        assert!(g.contains("afade=t=out:st=3:d=1,adelay=0:all=1[a0]"), "{g}");
+        assert!(g.contains("afade=t=in:st=0:d=0.5,adelay=3500:all=1[a1]"), "{g}");
+
+        p.tracks[0].clips[1].transition.kind = "push-left".into();
+        let g = build_plan(&p, &opts()).unwrap().filter_script;
+        let e = "st(0,clip((t-3.5)/0.5,0,1));ld(0)*ld(0)*(3-2*ld(0))";
+        assert!(g.contains(&format!("overlay=x='-1167-1080*({e})':y=0:")), "klip lama terdorong ke kiri: {g}");
+        assert!(g.contains(&format!("overlay=x='0+1080*(1-({e}))':y=656:")), "klip baru (pas, y=656) masuk dari kanan: {g}");
+        assert!(!g.contains("fade=t=in:st=3.5"));
+
+        // Klip pertama di track tidak punya pendahulu: transisinya diabaikan.
+        p.tracks[0].clips[0].transition = Transition { kind: "fade".into(), duration: 1.0 };
+        assert!(!build_plan(&p, &opts()).unwrap().filter_script.contains("fade=t=in:st=0:d=1:alpha=1"));
     }
 
     #[test]

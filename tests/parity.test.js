@@ -42,3 +42,13 @@ test("chroma key mengikuti rumus colorkey ffmpeg", () => {
   assert.equal(px[15], 0, "alpha asli tidak pernah dinaikkan");
   assert.deepEqual(geometry.hexToRgb("#0047bb"), [0, 71, 187]);
 });
+
+test("transisi preview memakai easing smoothstep yang sama dengan ekspor", () => {
+  assert.equal(geometry.ease(0.5), 0.5);
+  assert.ok(Math.abs(geometry.ease(0.25) - 0.15625) < 1e-12);
+  const mid = geometry.transitionAt(3.75, 3.5, { kind: "push-left", duration: 0.5 }, null, 0, 1080, 1920);
+  assert.equal(mid.dx, 540);
+  const out = geometry.transitionAt(3.75, 0, null, { kind: "push-left", duration: 0.5 }, 3.5, 1080, 1920);
+  assert.equal(out.dx, -540);
+  assert.ok(Math.abs(geometry.transitionAt(3.6, 3.5, { kind: "fade", duration: 0.4 }, null, 0, 1, 1).alpha - geometry.ease(0.25)) < 1e-9);
+});
