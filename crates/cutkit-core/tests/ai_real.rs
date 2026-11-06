@@ -21,7 +21,7 @@ fn norm(s: &str) -> String {
 fn piper_then_whisper_roundtrip() {
     let tools = find_tools(None).expect("ffmpeg");
     let dir = models_dir();
-    for id in ["piper-engine", "piper-id", "piper-id-config", "whisper-small", "vad-silero"] {
+    for id in ["piper-engine", "piper-id", "piper-id-config", "whisper-small"] {
         assert!(ai::is_installed(&dir, model(id).unwrap()), "{id} belum ada di {}", dir.display());
     }
     let work = std::env::temp_dir().join("cutkit-test").join("ai");
@@ -33,7 +33,7 @@ fn piper_then_whisper_roundtrip() {
     assert!(res.duration > 3.0 && res.sentences[1].start > res.sentences[0].end, "{res:?}");
 
     let out = "cutkit-test-transcribe.json";
-    let args = ai::transcribe_args(&wav.to_string_lossy(), 0.0, 0.0, model("whisper-small").unwrap().file, Some(model("vad-silero").unwrap().file), "id", out);
+    let args = ai::transcribe_args(&wav.to_string_lossy(), 0.0, 0.0, model("whisper-small").unwrap().file, None, "id", out);
     let t0 = std::time::Instant::now();
     run_ffmpeg_progress(&tools.ffmpeg, &dir, &args, Arc::new(AtomicBool::new(false)), |_, _| {}).expect("whisper");
     eprintln!("whisper small: {:.1} detik untuk audio {:.1} detik", t0.elapsed().as_secs_f64(), res.duration);

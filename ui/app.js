@@ -960,7 +960,8 @@ async function autoCaptionDialog() {
   modelSel.addEventListener("change", updNote);
   updNote();
   const langSel = el("select", {}, LANGS.map(([v, l]) => el("option", { value: v, selected: v === (localStorage.getItem("cutkit.lang") || "id") }, l)));
-  const vad = el("input", { type: "checkbox", checked: true });
+  // VAD di filter whisper ffmpeg ternyata sangat lambat (54 detik audio: 180 s vs 7 s tanpa VAD), jadi bawaannya mati.
+  const vad = el("input", { type: "checkbox", checked: false });
   const script = el("textarea", { placeholder: "Opsional: tempel naskah voice over. Ejaan caption diambil dari naskah, waktunya dari suara." });
   const go = el("button", { class: "btn primary" }, "Buat caption");
   go.addEventListener("click", () => runAutoCaption({ trackId: srcSel.value, model: modelSel.value, language: langSel.value, vad: vad.checked, script: script.value }));
@@ -969,7 +970,7 @@ async function autoCaptionDialog() {
     field("Sumber suara", srcSel),
     field("Model", modelSel), note,
     field("Bahasa", langSel),
-    field("Jeda", el("label", { class: "check" }, vad, "Potong di jeda dengan deteksi suara (lebih rapi)")),
+    field("Jeda", el("label", { class: "check" }, vad, "Deteksi suara (VAD): hanya untuk audio dengan banyak musik/hening, jauh lebih lambat")),
     script,
     el("p", { class: "hint" }, `Model disimpan di ${info.models_dir}`),
     el("div", { class: "modal-actions" }, el("button", { class: "btn", onclick: closeModal }, "Batal"), go));
