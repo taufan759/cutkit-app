@@ -1,6 +1,6 @@
 # CutKit
 
-Editor video desktop yang ringan untuk **Shorts 9:16**: potong, susun, tambah musik, SFX, meme, teks judul, dan caption kata-per-kata, lalu ekspor MP4 1080×1920. Semua diproses di komputermu dengan ffmpeg, tanpa akun dan tanpa internet.
+Editor video desktop yang ringan untuk **Shorts 9:16 maupun video YouTube panjang 16:9/4K**: potong, susun, transisi, efek, filter warna, keyframe, musik, SFX, meme, stiker, teks judul, caption kata-per-kata otomatis dari suara, TTS, dan hapus background, lalu ekspor MP4. Semua diproses di komputermu dengan ffmpeg dan model AI lokal; internet hanya dipakai sekali untuk mengunduh model yang kamu pilih.
 
 Dibangun dengan [Tauri 2](https://tauri.app) (Rust + WebView2 bawaan Windows) dan UI HTML/CSS/JS polos tanpa framework, jadi aplikasinya kecil dan tetap enteng di laptop tanpa GPU khusus.
 
@@ -10,7 +10,8 @@ Dibangun dengan [Tauri 2](https://tauri.app) (Rust + WebView2 bawaan Windows) da
 2. Kalau muncul banner **ffmpeg belum terpasang**, klik **Pasang otomatis**. CutKit memasang ffmpeg lewat winget (tanpa terminal, tanpa hak admin) dan menampilkan prosesnya. Status bisa dicek kapan saja di menu **Proyek → Cek sistem & ffmpeg**.
 3. Di layar sambutan pilih salah satu:
    - **🎬 Coba contoh**: membuat proyek latihan berisi narasi, gambar, klip, musik, judul, dan caption. Cocok untuk belajar; panduan 7 langkah langsung menjelaskan tiap bagian layar.
-   - **⚡ Buat Shorts cepat**: pilih satu folder berisi voice over, gambar/klip, dan caption, lalu timeline tersusun sendiri.
+   - **⚡ Buat video cepat**: pilih satu folder berisi voice over, gambar/klip, dan caption, lalu timeline tersusun sendiri (Shorts atau YouTube 16:9).
+   - **📐 Dari template**: susunan siap pakai (Fakta Shorts, Reaksi meme, Intro YouTube), tinggal pilih media pengganti.
    - **＋ Proyek kosong**: susun sendiri dari awal.
 4. Rapikan bila perlu (potong dengan S, hapus dengan Delete, geser gambar di preview), lalu klik **Ekspor**.
 
@@ -32,6 +33,16 @@ Gambar dibagi sepanjang voice over. Klip video yang lebih pendek dari jatahnya d
 
 | Bagian | Isi |
 |---|---|
+| Video panjang | Preset YouTube 16:9 (1920×1080) dan 4K (3840×2160), timeline sampai berjam-jam (waktu jam:menit:detik), ekspor bertahap per bagian supaya RAM tetap kecil, daftar kata caption per halaman dengan pencarian |
+| Auto caption | Suara (voice over atau semua klip satu track) jadi caption kata-per-kata dengan Whisper, offline setelah model diunduh sekali (base 60 MB, small 190 MB, medium 539 MB). Naskah opsional dipakai untuk membetulkan ejaan sambil mempertahankan waktu dari suara. Di i5-1345U model small sekitar 8x lebih cepat dari durasi audio |
+| TTS | Tab Suara: naskah jadi narasi Bahasa Indonesia offline dengan Piper, kecepatan dan jeda antar kalimat bisa diatur, langsung masuk timeline beserta caption yang waktunya diselaraskan dengan Whisper |
+| Ketukan musik | Deteksi tempo (BPM) dan ketukan, garis ketukan di klip musik, snap ke ketukan, tombol "Sinkronkan potongan", dan wizard yang mengganti gambar tepat di ketukan |
+| Transisi | Crossfade, geser 4 arah, dan dorong kiri/kanan antar klip di track yang sama; klip menumpuk sepanjang transisi seperti CapCut dan suara ikut crossfade |
+| Efek | Getar, zoom kejut, kilat, hitam putih, vignette, blur, glitch RGB, negatif, sensor piksel, letterbox — sebagai klip di track Efek yang berlaku pada lapisan di bawahnya |
+| Filter warna | Kecerahan, kontras, saturasi, rona, suhu, file LUT `.cube`, dan preset (Hangat, Dingin, Cerah, Dramatis, Vintage, Pudar, Hitam putih) |
+| Keyframe | Animasi posisi, skala, rotasi, dan opacity di antara keyframe; slider dan geser di preview mengubah keyframe di playhead |
+| Stiker & template | 48 stiker emoji Twemoji, stiker teks (SUBSCRIBE, Tonton sampai habis, ...), template bawaan, dan template buatan sendiri |
+| Hapus background | Tanpa green screen: model U²-Net (cepat, 4,6 MB) atau IS-Net (akurat, 179 MB) memisahkan orang/benda dari latarnya; gambar jadi PNG transparan, video jadi WebM beralpha |
 | Untuk pemula | Contoh proyek siap putar, wizard Buat Shorts cepat, panduan langkah demi langkah, cek sistem, pasang ffmpeg otomatis, bersihkan cache, dan petunjuk saat layar masih kosong |
 | Proyek | Buat dan buka proyek (file `.cutkit.json` di folder proyek), tersimpan otomatis, daftar proyek terakhir. Rasio 9:16, 1:1, 4:5, 3:4, 16:9; 24 sampai 60 fps |
 | Impor | Video, gambar, dan audio lewat tombol Impor atau seret dari Explorer langsung ke timeline/preview. File `.srt` yang diseret langsung jadi caption |
@@ -83,6 +94,11 @@ Waktu dalam detik. Yang juga diterima:
 | + / −, Ctrl+scroll | Zoom timeline |
 | N, tahan Alt | Snap aktif/mati, matikan sementara saat menyeret |
 
+## Atribusi
+
+- Stiker emoji: [Twemoji](https://github.com/jdecked/twemoji) © Twitter, Inc. dan kontributor, CC-BY 4.0 (lihat `ui/stickers`).
+- Model AI pihak ketiga di atas diunduh saat dipakai dan tidak ikut di dalam installer.
+
 ## Cara kerja ekspor
 
 Proyek diubah menjadi satu perintah ffmpeg (lihat `crates/cutkit-core/src/export.rs`):
@@ -93,9 +109,25 @@ Proyek diubah menjadi satu perintah ffmpeg (lihat `crates/cutkit-core/src/export
 
 Filter graph ditulis ke file (`-/filter_complex`) sehingga proyek panjang tidak terbentur batas panjang baris perintah Windows. Rumus penempatan klip dan pembagian halaman caption ada di Rust dan JS sekaligus; tes `parity` memastikan keduanya sama sehingga preview cocok dengan hasil ekspor.
 
+## Model AI dan tempat penyimpanannya
+
+Semua model diunduh dari sumber resmi lewat HTTPS dan dicek ukuran serta SHA-256-nya sebelum dipakai. Folder model bisa diganti di **Proyek → Cek sistem & ffmpeg** (di laptop pemilik: `D:\DevTools\cutkit-models`).
+
+| Model | Sumber | Lisensi | Ukuran |
+|---|---|---|---|
+| Whisper base/small/medium (ggml) | huggingface.co/ggerganov/whisper.cpp | MIT | 60/190/539 MB |
+| Silero VAD (opsional, lambat) | huggingface.co/ggml-org/whisper-vad | MIT | 0,9 MB |
+| Piper 2023.11.14-2 (mesin TTS) | github.com/rhasspy/piper | MIT | 22 MB |
+| Suara id_ID news_tts medium | huggingface.co/rhasspy/piper-voices | lihat MODEL_CARD | 63 MB |
+| U²-Net kecil / IS-Net (hapus background) | github.com/danielgatis/rembg (rilis model) | Apache 2.0 | 4,6/179 MB |
+
+Hapus background juga memasang lingkungan Python terpisah (`py\` di folder model, sekitar 150 MB) berisi onnxruntime, numpy, dan pillow; butuh Python 3 yang sudah terpasang.
+
+Auto caption memakai filter `whisper` bawaan ffmpeg (build Gyan sudah menyertakan whisper.cpp). Deteksi suara (VAD) dimatikan secara bawaan karena di filter ini 25x lebih lambat tanpa menambah jumlah kata yang terbaca.
+
 ## Asal ide fitur
 
-Beberapa fitur (kecepatan, Ken Burns, latar blur, chroma key, loudness, animasi pop caption) dipilih setelah menginventaris model editing CapCut 4.6 yang terpasang di laptop dengan REA: hanya nama kelas dan field dari tabel export DLL-nya (misalnya `MaterialSpeed`, `MaterialCanvas`, `MaterialChroma`, `MaterialLoudness`, `KeyframeVideo`) untuk melihat fitur apa yang umum di editor Shorts. Tidak ada kode, aset, template, atau efek CapCut yang disalin; semua implementasi di sini ditulis sendiri di atas ffmpeg.
+Beberapa fitur (kecepatan, Ken Burns, latar blur, chroma key, loudness, animasi pop caption, transisi, efek, filter warna, keyframe, ketukan, hapus background) dipilih setelah menginventaris model editing CapCut 4.6 yang terpasang di laptop dengan REA: hanya nama kelas dan field dari tabel export DLL-nya (misalnya `MaterialSpeed`, `MaterialCanvas`, `MaterialChroma`, `MaterialLoudness`, `KeyframeVideo`) untuk melihat fitur apa yang umum di editor Shorts. Tidak ada kode, aset, template, atau efek CapCut yang disalin; semua implementasi di sini ditulis sendiri di atas ffmpeg.
 
 ## Batasan saat ini
 
@@ -103,7 +135,9 @@ Beberapa fitur (kecepatan, Ken Burns, latar blur, chroma key, loudness, animasi 
 - Volume di atas 100% hanya terdengar di hasil ekspor; preview dibatasi 100%.
 - GIF animasi diputar satu kali; duplikat klipnya untuk mengulang.
 - Font harus terpasang di Windows. Preview dan ekspor memakai font yang sama, tapi tebal tepi bisa beda tipis.
-- Belum ada transisi antar klip dan keyframe bebas (gerak masih berupa preset zoom/geser).
+- Keyframe belum tersedia untuk klip teks (teks dirender libass); geser/skala teks tetap bisa diatur statis.
+- Pustaka efek, stiker, dan template bersifat lokal (bawaan + buatan sendiri), belum ada katalog online.
+- Hapus background video memproses tiap frame di CPU: klip 10 detik dengan model cepat butuh sekitar satu menit, model akurat lebih lama.
 
 ## Struktur
 
