@@ -100,3 +100,24 @@ fn export_synthetic_project() {
     assert!(err.contains("dibatalkan"));
     assert!(!out2.exists());
 }
+
+#[test]
+fn demo_media_is_generated() {
+    let Some(tools) = find_tools(None) else {
+        eprintln!("ffmpeg tidak ditemukan, tes media contoh dilewati");
+        return;
+    };
+    let dir = tmp_dir("demo");
+    let (media, jobs) = cutkit_core::demo::demo_jobs(&dir);
+    for (_, args) in &jobs {
+        run(&tools.ffmpeg, args).expect("media contoh dibuat");
+    }
+    let voice = probe(&tools.ffprobe, &media.voice).unwrap();
+    assert_eq!(voice.kind, AssetKind::Audio);
+    assert!(voice.duration > 3.0, "narasi TTS terlalu pendek: {}", voice.duration);
+    let kinds: Vec<AssetKind> = media.visuals.iter().map(|v| probe(&tools.ffprobe, v).unwrap().kind).collect();
+    assert_eq!(kinds, vec![AssetKind::Image, AssetKind::Video, AssetKind::Image, AssetKind::Video, AssetKind::Image]);
+    let img = probe(&tools.ffprobe, &media.visuals[0]).unwrap();
+    assert_eq!((img.width, img.height), (1080, 1920));
+    assert!((probe(&tools.ffprobe, &media.music).unwrap().duration - 20.0).abs() < 0.1);
+}

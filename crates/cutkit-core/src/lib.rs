@@ -2,6 +2,7 @@
 //! Tidak bergantung pada Tauri sehingga semua logika bisa diuji dengan `cargo test`.
 
 pub mod ass;
+pub mod demo;
 pub mod export;
 pub mod ffmpeg;
 pub mod layout;
