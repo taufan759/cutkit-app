@@ -21,6 +21,9 @@ const HELP: &str = "cutkit-cli <perintah> [argumen]
   beats <file>                           tempo dan ketukan musik
   remove-bg <masuk> <keluar> [--kind image|video] [--start s] [--duration d] [--fps 30] [--model matting-fast] [--audio]
   download <id-model>                    unduh model (lihat info)
+  setup [--ffmpeg] [--download whisper-small,piper-id,...] [--claude] [--installer]
+                                         persiapan untuk pemula (dijalankan installer)
+  uninstall [--delete-models]            lepas MCP dari Claude dan hapus cache (dijalankan uninstaller)
 
 Opsi umum: --models <folder> (bawaan: folder model aplikasi CutKit)";
 
@@ -37,7 +40,7 @@ impl Args {
         while i < raw.len() {
             let a = &raw[i];
             if let Some(name) = a.strip_prefix("--") {
-                let takes = !matches!(name, "qsv" | "loudnorm" | "vad" | "audio");
+                let takes = !matches!(name, "qsv" | "loudnorm" | "vad" | "audio" | "installer" | "ffmpeg" | "claude" | "yes" | "delete-models");
                 if takes && i + 1 < raw.len() {
                     flags.push((name.to_string(), Some(raw[i + 1].clone())));
                     i += 2;
@@ -211,8 +214,235 @@ fn run(args: Args) -> Result<Value, String> {
             }
             Ok(json!({ "id": m.id, "installed": true, "models_dir": dir.to_string_lossy() }))
         }
+        "setup" => setup(&args, &dir),
+        "uninstall" => uninstall(&args, &dir),
         _ => Err(HELP.to_string()),
     }
+}
+
+/* ---------- persiapan untuk pemula (dijalankan installer) ---------- */
+
+/// Folder program: `<app>\mcp\cutkit-cli.exe` → `<app>`.
+fn app_dir(args: &Args) -> PathBuf {
+    if let Some(d) = args.get("app") {
+        return PathBuf::from(d);
+    }
+    let exe = std::env::current_exe().unwrap_or_default();
+    let dir = exe.parent().map(Path::to_path_buf).unwrap_or_default();
+    if dir.file_name().map(|n| n.eq_ignore_ascii_case("mcp")).unwrap_or(false) {
+        dir.parent().map(Path::to_path_buf).unwrap_or(dir)
+    } else {
+        dir
+    }
+}
+
+fn bar(got: u64, total: u64) {
+    use std::io::Write;
+    let mb = |b: u64| b as f64 / 1_048_576.0;
+    if total > 0 {
+        let pct = (got as f64 / total as f64).min(1.0);
+        let fill = (pct * 30.0).round() as usize;
+        print!("\r     [{}{}] {:>3.0}%  {:.0}/{:.0} MB   ", "#".repeat(fill), ".".repeat(30 - fill), pct * 100.0, mb(got), mb(total));
+    } else {
+        print!("\r     {:.0} MB   ", mb(got));
+    }
+    let _ = std::io::stdout().flush();
+}
+
+fn step(n: usize, total: usize, title: &str) {
+    println!("\n[{n}/{total}] {title}");
+}
+
+/// Menyiapkan semua kebutuhan CutKit dan mencetak progres yang mudah dibaca. Langkah yang
+/// gagal dilaporkan di akhir tanpa menghentikan langkah lain; aplikasi tetap bisa dipakai.
+fn setup(args: &Args, models: &Path) -> Result<Value, String> {
+    let app = app_dir(args);
+    let want_models: Vec<String> = args.get("download").map(|m| m.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()).unwrap_or_default();
+    let mut plan: Vec<&str> = vec!["webview2"];
+    if args.has("ffmpeg") {
+        plan.push("ffmpeg");
+    }
+    if !want_models.is_empty() {
+        plan.push("models");
+    }
+    if args.has("claude") {
+        plan.push("claude");
+    }
+    let total = plan.len();
+    let mut done: Vec<String> = vec![];
+    let mut failed: Vec<String> = vec![];
+    println!("Menyiapkan CutKit di {}", app.display());
+    println!("Jendela ini menampilkan proses persiapan. Biarkan terbuka sampai selesai.");
+
+    for (i, what) in plan.iter().enumerate() {
+        let n = i + 1;
+        match *what {
+            "webview2" => {
+                step(n, total, "Mesin tampilan (Microsoft WebView2)");
+                if cutkit_core::setup::webview2_installed() {
+                    println!("     Sudah ada.");
+                } else {
+                    println!("     Memasang WebView2 dari Microsoft...");
+                    match cutkit_core::setup::install_webview2(bar) {
+                        Ok(()) => {
+                            println!("\n     Selesai.");
+                            done.push("WebView2".into());
+                        }
+                        Err(e) => {
+                            println!("\n     Gagal: {e}");
+                            failed.push(format!("WebView2: {e}"));
+                        }
+                    }
+                }
+            }
+            "ffmpeg" => {
+                step(n, total, "ffmpeg (untuk impor, preview, dan ekspor video)");
+                if let Some(t) = find_tools(None) {
+                    println!("     Sudah ada: {} ({})", t.ffmpeg, t.version);
+                } else {
+                    println!("     Memasang ffmpeg lewat winget. Bisa beberapa menit tergantung internet...");
+                    match ffmpeg::install_ffmpeg(|line| println!("     {line}")) {
+                        Ok(()) => {
+                            println!("     ffmpeg terpasang.");
+                            done.push("ffmpeg".into());
+                        }
+                        Err(e) => {
+                            println!("     Gagal: {e}");
+                            failed.push(format!("ffmpeg: {e} (bisa dipasang nanti dari menu Proyek → Cek sistem & ffmpeg)"));
+                        }
+                    }
+                }
+            }
+            "models" => {
+                step(n, total, &format!("Model AI (disimpan di {})", models.display()));
+                for id in &want_models {
+                    let Some(m) = ai::model(id) else {
+                        failed.push(format!("Model tidak dikenal: {id}"));
+                        continue;
+                    };
+                    if ai::is_installed(models, m) {
+                        println!("     {}: sudah ada.", m.label);
+                        continue;
+                    }
+                    println!("     Mengunduh {} ({:.0} MB)...", m.label, m.size as f64 / 1_048_576.0);
+                    match ai::download(m, models, Arc::new(AtomicBool::new(false)), bar) {
+                        Ok(()) => {
+                            println!("\n     Selesai, checksum SHA-256 cocok.");
+                            done.push(m.label.to_string());
+                        }
+                        Err(e) => {
+                            println!("\n     Gagal: {e}");
+                            failed.push(format!("{}: {e} (bisa diunduh nanti dari aplikasi)", m.label));
+                        }
+                    }
+                }
+            }
+            "claude" => {
+                step(n, total, "Hubungkan ke Claude (MCP)");
+                match connect_claude(&app) {
+                    Ok(list) if list.is_empty() => println!("     Aplikasi Claude belum terdeteksi. Nanti bisa dihubungkan dari menu Proyek → Hubungkan ke Claude."),
+                    Ok(list) => {
+                        for c in &list {
+                            println!("     Terhubung ke {c}.");
+                        }
+                        println!("     Buka ulang Claude supaya tool CutKit muncul.");
+                        done.push("Claude (MCP)".into());
+                    }
+                    Err(e) => {
+                        println!("\n     Gagal: {e}");
+                        failed.push(format!("Claude (MCP): {e} (bisa diulang dari menu Proyek → Hubungkan ke Claude)"));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    println!();
+    if failed.is_empty() {
+        println!("Semua siap. CutKit akan terbuka sebentar lagi.");
+    } else {
+        println!("Selesai dengan catatan. CutKit tetap bisa dipakai; bagian berikut bisa diulang dari aplikasi:");
+        for f in &failed {
+            println!("  - {f}");
+        }
+    }
+    if args.has("installer") {
+        if failed.is_empty() {
+            std::thread::sleep(std::time::Duration::from_secs(3));
+        } else {
+            println!("\nTekan Enter untuk menutup jendela ini.");
+            let mut s = String::new();
+            let _ = std::io::stdin().read_line(&mut s);
+        }
+    }
+    Ok(json!({ "done": done, "failed": failed }))
+}
+
+/// Mendaftarkan server MCP ke semua aplikasi Claude yang terdeteksi; Node.js portabel dipasang bila perlu.
+fn connect_claude(app: &Path) -> Result<Vec<String>, String> {
+    let server = app.join("mcp").join("server.js");
+    if !server.is_file() {
+        return Err(format!("{} tidak ada", server.display()));
+    }
+    let clients: Vec<_> = cutkit_core::mcpcfg::clients().into_iter().filter(|(_, _, p)| p.parent().map(|d| d.is_dir()).unwrap_or(false)).collect();
+    if clients.is_empty() {
+        return Ok(vec![]);
+    }
+    let node = match cutkit_core::mcpcfg::find_node(Some(app)) {
+        Some(n) => n,
+        None => {
+            println!("     Memasang Node.js portabel untuk server MCP (±30 MB, dicek SHA-256)...");
+            let v = cutkit_core::setup::install_node(app, bar)?;
+            println!("\n     Node.js {v} siap.");
+            cutkit_core::setup::bundled_node(app).to_string_lossy().to_string()
+        }
+    };
+    let server_s = server.to_string_lossy().replace('\\', "/");
+    let mut out = vec![];
+    for (_, name, path) in clients {
+        cutkit_core::mcpcfg::install(&path, "cutkit", &node, &[server_s.clone()])?;
+        out.push(name.to_string());
+    }
+    Ok(out)
+}
+
+/// Dipanggil uninstaller: melepas MCP CutKit dari Claude dan menghapus cache. Proyek dan
+/// template tidak disentuh; model AI hanya dihapus dengan `--delete-models`.
+fn uninstall(args: &Args, models: &Path) -> Result<Value, String> {
+    let app = app_dir(args);
+    let ours = app.join("mcp").to_string_lossy().replace('\\', "/").to_lowercase();
+    let mut removed = vec![];
+    for (_, name, path) in cutkit_core::mcpcfg::clients() {
+        let entry = cutkit_core::mcpcfg::entry(&path, "cutkit");
+        let mine = entry.as_ref().and_then(|v| v["args"].get(0)).and_then(|v| v.as_str()).map(|s| s.replace('\\', "/").to_lowercase().starts_with(&ours)).unwrap_or(false);
+        if mine && cutkit_core::mcpcfg::uninstall(&path, "cutkit").unwrap_or(false) {
+            removed.push(name);
+        }
+    }
+    let data = std::env::var("LOCALAPPDATA").map(|d| Path::new(&d).join("io.github.taufan759.cutkit")).ok();
+    if let Some(d) = &data {
+        for sub in ["proxy", "thumbs", "wave", "export", "EBWebView"] {
+            let _ = std::fs::remove_dir_all(d.join(sub));
+        }
+    }
+    let mut models_removed = false;
+    if args.has("delete-models") && models.is_dir() {
+        // Hanya file model CutKit yang dikenal (folder bisa dipilih sendiri dan berisi file lain).
+        for m in ai::MODELS {
+            let _ = std::fs::remove_file(models.join(m.file));
+        }
+        for sub in ["piper", "py"] {
+            let _ = std::fs::remove_dir_all(models.join(sub));
+        }
+        let _ = std::fs::remove_file(models.join("cutkit-matting.py"));
+        let _ = std::fs::remove_dir(models);
+        models_removed = true;
+    }
+    if let Some(d) = &data {
+        let _ = std::fs::remove_dir(d);
+    }
+    Ok(json!({ "mcp_removed_from": removed, "models_removed": models_removed }))
 }
 
 fn main() {
