@@ -235,7 +235,7 @@ Auto caption memakai filter `whisper` bawaan ffmpeg (build Gyan sudah menyertaka
 
 ## Asal ide fitur
 
-Beberapa fitur (kecepatan, Ken Burns, latar blur, chroma key, loudness, animasi pop caption, transisi, efek, filter warna, keyframe, ketukan, hapus background) dipilih setelah menginventaris model editing CapCut 4.6 yang terpasang di laptop dengan REA: hanya nama kelas dan field dari tabel export DLL-nya (misalnya `MaterialSpeed`, `MaterialCanvas`, `MaterialChroma`, `MaterialLoudness`, `KeyframeVideo`) untuk melihat fitur apa yang umum di editor Shorts. Tidak ada kode, aset, template, atau efek CapCut yang disalin; semua implementasi di sini ditulis sendiri di atas ffmpeg.
+Fitur-fitur CutKit (kecepatan, Ken Burns, latar blur, chroma key, loudness, animasi pop caption, transisi, efek, filter warna, keyframe, ketukan, hapus background) terinspirasi dari fitur yang umum ada di editor video populer untuk Shorts. Semua implementasinya ditulis sendiri di atas ffmpeg dan model AI open source; tidak ada kode, aset, template, atau efek dari aplikasi lain yang disalin.
 
 ## Batasan saat ini
 
