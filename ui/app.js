@@ -285,8 +285,9 @@ function welcome() {
     el("h2", {}, "Selamat datang di CutKit"),
     el("p", { class: "hint" }, "Editor video ringan untuk Shorts 9:16. Semua diproses di komputermu dengan ffmpeg."),
     el("div", { class: "big-actions" },
-      el("button", { class: "btn primary", onclick: newProjectDialog }, "＋ Proyek baru"),
-      el("button", { class: "btn", onclick: openProjectDialog }, "📂 Buka proyek")),
+      el("button", { class: "btn primary", onclick: () => quickDialog({ fromWelcome: true }) }, "⚡ Buat Shorts cepat", el("small", {}, "dari voice over + gambar")),
+      el("button", { class: "btn", onclick: newProjectDialog }, "＋ Proyek kosong", el("small", {}, "susun sendiri dari awal")),
+      el("button", { class: "btn", onclick: openProjectDialog }, "📂 Buka proyek", el("small", {}, "file .cutkit.json"))),
     recents.length ? el("h4", {}, "Terakhir dibuka") : null,
     recents.length ? el("div", { class: "recent" }, recents.map((r) => el("button", { onclick: () => openProjectPath(r.path) },
       el("span", {}, r.name || baseName(r.path)), el("span", { class: "p" }, r.path)))) : null));
@@ -745,7 +746,7 @@ function renderLibrary() {
   }
   $("#lib-path").replaceChildren(...crumbs.flatMap((c, i) => [i ? el("span", {}, "›") : null, el("button", { onclick: () => openLibrary(c, root) }, baseName(c) || c)]).filter(Boolean));
   const q = filter.trim().toLowerCase();
-  const list = entries.filter((e) => !q || e.name.toLowerCase().includes(q));
+  const list = entries.filter((e) => (e.is_dir || kindOfPath(e.path)) && (!q || e.name.toLowerCase().includes(q)));
   const shown = list.slice(0, state.lib.shown);
   const items = shown.map((e) => {
     if (e.is_dir) return el("div", { class: "lib-item dir", title: e.name, onclick: () => openLibrary(e.path, root) }, el("div", { class: "ico" }, "📁"), el("div", { class: "n" }, e.name));
@@ -1199,6 +1200,133 @@ function resizePreview() {
   preview.resize(area.clientWidth - 24, area.clientHeight - 24);
 }
 
+/* ---------- buat Shorts cepat ---------- */
+
+const naturalSort = (a, b) => a.localeCompare(b, "id", { numeric: true, sensitivity: "base" });
+
+/** Menebak isi folder: audio dengan nama vo/voice/narasi = voice over, file audio lain = musik. */
+function classifyFolder(entries) {
+  const files = entries.filter((e) => !e.is_dir).sort((a, b) => naturalSort(a.name, b.name));
+  const audio = files.filter((e) => kindOfPath(e.path) === "audio");
+  const voiceRe = /(^|[^a-z])(vo|voice|voiceover|narasi|narration|suara|tts)([^a-z]|$)/i;
+  const musicRe = /(music|musik|bgm|backsound|lagu)/i;
+  let voice = audio.find((e) => voiceRe.test(e.name)) || null;
+  let music = audio.find((e) => e !== voice && musicRe.test(e.name)) || null;
+  if (!voice) voice = audio.find((e) => e !== music) || null;
+  if (!music && audio.length === 2) music = audio.find((e) => e !== voice) || null;
+  const visuals = files.filter((e) => ["image", "video"].includes(kindOfPath(e.path)));
+  const caption = files.find((e) => /\.(json)$/i.test(e.name) && /(word|kata|caption|align|timing|beat)/i.test(e.name))
+    || files.find((e) => /\.srt$/i.test(e.name))
+    || files.find((e) => /\.json$/i.test(e.name) && !/cutkit/i.test(e.name))
+    || null;
+  return { voice: voice && voice.path, music: music && music.path, visuals: visuals.map((e) => e.path), caption: caption && caption.path };
+}
+
+async function readCaptionWords(path) {
+  const text = await invoke("read_text", { path });
+  return /\.srt$/i.test(path) ? CAP.srtToWords(CAP.parseSrt(text)) : CAP.parseWordsJson(text);
+}
+
+function quickDialog(opts = {}) {
+  const sel = { voice: null, visuals: [], music: null, caption: null, script: "", musicVolume: 15, fit: "cover", capPreset: 0 };
+  const needsProject = !state.path || opts.fromWelcome;
+  const name = el("input", { type: "text", value: `Shorts ${new Date().toLocaleDateString("id-ID").replace(/\//g, "-")}` });
+  const summary = el("div", { class: "quick-summary" });
+  const show = (path) => (path ? baseName(path) : "—");
+  const render = () => {
+    summary.replaceChildren(
+      el("div", {}, el("span", {}, "Voice over"), el("b", {}, show(sel.voice))),
+      el("div", {}, el("span", {}, "Gambar/klip"), el("b", {}, sel.visuals.length ? `${sel.visuals.length} file (${sel.visuals.slice(0, 3).map(baseName).join(", ")}${sel.visuals.length > 3 ? ", …" : ""})` : "—")),
+      el("div", {}, el("span", {}, "Caption"), el("b", {}, sel.caption ? show(sel.caption) : sel.script.trim() ? "dari naskah yang diketik" : "—")),
+      el("div", {}, el("span", {}, "Musik latar"), el("b", {}, show(sel.music))));
+    go.disabled = !sel.voice && !sel.visuals.length;
+  };
+  const pickFolder = async () => {
+    const dir = await tauri.dialog.open({ directory: true });
+    if (!dir) return;
+    try {
+      const found = classifyFolder(await invoke("list_dir", { path: dir }));
+      Object.assign(sel, found);
+      if (needsProject && !name.dataset.touched) name.value = baseName(dir);
+      render();
+      if (!found.visuals.length && !found.voice) toast("Folder ini tidak berisi audio, gambar, atau video.", true);
+    } catch (e) { toast(errMsg(e), true); }
+  };
+  const pickFile = (key, filters, multiple = false) => async () => {
+    const picked = await tauri.dialog.open({ multiple, filters });
+    if (!picked) return;
+    if (key === "visuals") sel.visuals = (Array.isArray(picked) ? picked : [picked]).sort(naturalSort);
+    else sel[key] = picked;
+    render();
+  };
+  const clear = (key) => () => { sel[key] = key === "visuals" ? [] : null; render(); };
+  const script = el("textarea", { placeholder: "Opsional: tempel naskah voice over. Waktunya dibagi rata sepanjang voice over (lebih pas pakai JSON kata atau SRT)." });
+  script.addEventListener("input", () => { sel.script = script.value; render(); });
+  name.addEventListener("input", () => { name.dataset.touched = "1"; });
+  const vol = el("input", { type: "range", min: 0, max: 60, value: sel.musicVolume });
+  const volLabel = el("span", { class: "unit", style: "width:34px" }, `${sel.musicVolume}%`);
+  vol.addEventListener("input", () => { sel.musicVolume = +vol.value; volLabel.textContent = `${vol.value}%`; });
+  const go = el("button", { class: "btn primary", disabled: true }, "Susun timeline");
+  go.addEventListener("click", async () => {
+    go.disabled = true;
+    go.textContent = "Menyusun…";
+    try { await runQuick(sel, needsProject ? name.value : null); } catch (e) { toast(errMsg(e), true); go.disabled = false; go.textContent = "Susun timeline"; }
+  });
+  const row = (label, ...btns) => el("div", { class: "field" }, el("label", {}, label), el("div", { class: "ctl" }, ...btns));
+  openModal(
+    el("h2", {}, "⚡ Buat Shorts cepat"),
+    el("p", { class: "hint" }, "Pilih voice over dan gambar/klip; CutKit membagi gambar sepanjang suara, memotong tepat di awal kata, menambah caption dan musik pelan. Hasilnya tetap bisa diedit."),
+    needsProject ? field("Nama proyek", name) : null,
+    el("button", { class: "btn", onclick: pickFolder }, "📁 Pilih satu folder berisi semuanya…"),
+    el("p", { class: "hint" }, "Contoh isi folder: vo.mp3, 01.png, 02.png, 03.mp4, words.json (atau .srt), musik.mp3. Urutan gambar mengikuti nama file."),
+    row("Voice over", el("button", { class: "btn small", onclick: pickFile("voice", [{ name: "Audio", extensions: AUDIO_EXT }]) }, "Pilih…"), el("button", { class: "btn small ghost", onclick: clear("voice") }, "Kosongkan")),
+    row("Gambar/klip", el("button", { class: "btn small", onclick: pickFile("visuals", [{ name: "Gambar & video", extensions: [...IMAGE_EXT, ...VIDEO_EXT] }], true) }, "Pilih…"), el("button", { class: "btn small ghost", onclick: clear("visuals") }, "Kosongkan")),
+    row("Caption", el("button", { class: "btn small", onclick: pickFile("caption", [{ name: "SRT / JSON kata", extensions: ["srt", "json"] }]) }, "Pilih…"), el("button", { class: "btn small ghost", onclick: clear("caption") }, "Kosongkan")),
+    row("Musik latar", el("button", { class: "btn small", onclick: pickFile("music", [{ name: "Audio", extensions: AUDIO_EXT }]) }, "Pilih…"), el("button", { class: "btn small ghost", onclick: clear("music") }, "Kosongkan")),
+    row("Volume musik", vol, volLabel),
+    row("Gambar", segmented([["cover", "Penuh layar"], ["contain", "Utuh (ada pinggiran)"]], sel.fit, (v) => { sel.fit = v; })),
+    row("Gaya caption", segmented(CAPTION_PRESETS.map((pr, i) => [i, pr.name]), sel.capPreset, (v) => { sel.capPreset = v; })),
+    script,
+    summary,
+    el("div", { class: "modal-actions" },
+      el("button", { class: "btn", onclick: () => (state.path ? closeModal() : welcome()) }, "Batal"),
+      go));
+  render();
+}
+
+async function runQuick(sel, newName) {
+  if (newName != null) {
+    let parent;
+    try { parent = joinPath(await tauri.path.documentDir(), "CutKit"); } catch { parent = "C:\\CutKit"; }
+    const p = TL.newProject(newName.trim() || "Shorts");
+    await setProject(p, joinPath(joinPath(parent, safeName(p.name)), projectFileName(p.name)));
+  } else if (TL.duration(state.project) > 0 && !(await ask("Isi timeline sekarang akan diganti hasil susunan otomatis (bisa di-undo dengan Ctrl+Z). Lanjut?"))) {
+    return;
+  }
+  const paths = [sel.voice, ...sel.visuals, sel.music].filter(Boolean);
+  const assets = await importPaths(paths);
+  const byPath = new Map(assets.map((a) => [a.path.toLowerCase(), a]));
+  const get = (p) => (p ? byPath.get(p.toLowerCase()) || null : null);
+  const voice = get(sel.voice);
+  const music = get(sel.music);
+  const visuals = sel.visuals.map(get).filter(Boolean);
+  let words = null;
+  if (sel.caption) words = await readCaptionWords(sel.caption);
+  else if (sel.script.trim()) {
+    const end = voice ? voice.duration : visuals.length * TL.STILL_DURATION;
+    words = CAP.textToWords(sel.script, 0, end);
+  }
+  commit((p) => {
+    TL.autoAssemble(p, { voice, visuals, music, words, musicVolume: sel.musicVolume / 100, fit: sel.fit });
+    Object.assign(p.captions.style, CAPTION_PRESETS[sel.capPreset].style);
+  }, { captions: true });
+  closeModal();
+  await save().catch(() => {});
+  preview.seek(0);
+  tlView.fit();
+  toast(`Timeline tersusun: ${visuals.length} visual${voice ? ", voice over" : ""}${words ? `, ${words.length} kata caption` : ""}${music ? ", musik" : ""}. Tekan Spasi untuk memutar.`);
+}
+
 /* ---------- ekspor ---------- */
 
 function exportDialog() {
@@ -1421,7 +1549,8 @@ function wire() {
   document.addEventListener("click", () => $("#project-menu").classList.add("hidden"));
   $("#project-menu").addEventListener("click", (e) => {
     const cmd = e.target.closest("button")?.dataset.cmd;
-    if (cmd === "new") newProjectDialog();
+    if (cmd === "quick") quickDialog();
+    else if (cmd === "new") newProjectDialog();
     else if (cmd === "open") openProjectDialog();
     else if (cmd === "save") save().catch((err) => toast(errMsg(err), true));
     else if (cmd === "saveas") saveAs().catch((err) => toast(errMsg(err), true));
