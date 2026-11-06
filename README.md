@@ -4,10 +4,35 @@ Editor video desktop yang ringan untuk **Shorts 9:16**: potong, susun, tambah mu
 
 Dibangun dengan [Tauri 2](https://tauri.app) (Rust + WebView2 bawaan Windows) dan UI HTML/CSS/JS polos tanpa framework, jadi aplikasinya kecil dan tetap enteng di laptop tanpa GPU khusus.
 
+## Mulai cepat (untuk pemula)
+
+1. Pasang CutKit dari installer `CutKit_0.1.0_x64-setup.exe`, lalu buka dari Start Menu.
+2. Kalau muncul banner **ffmpeg belum terpasang**, klik **Pasang otomatis**. CutKit memasang ffmpeg lewat winget (tanpa terminal, tanpa hak admin) dan menampilkan prosesnya. Status bisa dicek kapan saja di menu **Proyek → Cek sistem & ffmpeg**.
+3. Di layar sambutan pilih salah satu:
+   - **🎬 Coba contoh**: membuat proyek latihan berisi narasi, gambar, klip, musik, judul, dan caption. Cocok untuk belajar; panduan 7 langkah langsung menjelaskan tiap bagian layar.
+   - **⚡ Buat Shorts cepat**: pilih satu folder berisi voice over, gambar/klip, dan caption, lalu timeline tersusun sendiri.
+   - **＋ Proyek kosong**: susun sendiri dari awal.
+4. Rapikan bila perlu (potong dengan S, hapus dengan Delete, geser gambar di preview), lalu klik **Ekspor**.
+
+### Isi folder untuk Buat Shorts cepat
+
+```
+Episode 12\
+  vo.mp3          voice over (nama berisi vo, voice, narasi, atau tts)
+  01.png          gambar/klip, diurutkan menurut nama file
+  02.png
+  03.mp4
+  words.json      waktu per kata (atau file .srt)
+  musik.mp3       opsional, diputar pelan di belakang (nama berisi musik, music, bgm, atau backsound)
+```
+
+Gambar dibagi sepanjang voice over. Klip video yang lebih pendek dari jatahnya diputar utuh, dan titik pergantian gambar ditempel ke awal kata terdekat supaya pas dengan ucapan. Semua hasilnya tetap bisa diedit dan di-undo.
+
 ## Fitur
 
 | Bagian | Isi |
 |---|---|
+| Untuk pemula | Contoh proyek siap putar, wizard Buat Shorts cepat, panduan langkah demi langkah, cek sistem, pasang ffmpeg otomatis, bersihkan cache, dan petunjuk saat layar masih kosong |
 | Proyek | Buat dan buka proyek (file `.cutkit.json` di folder proyek), tersimpan otomatis, daftar proyek terakhir. Rasio 9:16, 1:1, 4:5, 3:4, 16:9; 24 sampai 60 fps |
 | Impor | Video, gambar, dan audio lewat tombol Impor atau seret dari Explorer langsung ke timeline/preview. File `.srt` yang diseret langsung jadi caption |
 | Timeline | Multi-track video dan audio, potong (split), pangkas kiri/kanan, geser dan pindah track, hapus (biasa atau tutup celah), tukar urutan, duplikat, lapisan track naik/turun, bisukan/sembunyikan track, zoom, snap ke tepi klip, playhead, dan awal kata caption |
@@ -122,7 +147,8 @@ node tests/harness/server.js 5187
 - `tests/captions.test.js`: parser SRT (BOM, CRLF, tag, blok rusak), JSON kata, alignment ElevenLabs, ekspor SRT/JSON.
 - `tests/parity.test.js` dan `crates/cutkit-core/tests/parity.rs`: fixture yang sama untuk penempatan klip dan halaman caption di JS dan Rust.
 - Tes unit Rust: model, probe (video HP diputar, GIF, MP3 bersampul), pembuat ASS, penyusun argumen ffmpeg (diperiksa tanpa menjalankan ffmpeg).
-- `crates/cutkit-core/tests/export_real.rs`: membuat klip sintetis dengan ffmpeg, mengekspor proyek berisi potongan, overlay berputar, SFX, teks, dan caption, lalu memeriksa hasilnya dengan ffprobe. Dilewati bila ffmpeg tidak ada.
+- `crates/cutkit-core/tests/export_real.rs`: membuat klip sintetis dengan ffmpeg, mengekspor proyek berisi potongan, overlay berputar, SFX, teks, dan caption, lalu memeriksa hasilnya dengan ffprobe. Juga membuat semua media proyek contoh sungguhan. Dilewati bila ffmpeg tidak ada.
+- `tests/timeline.test.js` juga menguji susun otomatis: pembagian durasi, potongan menempel ke awal kata, musik, dan caption.
 
 ## Lisensi
 
