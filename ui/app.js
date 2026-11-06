@@ -1044,6 +1044,20 @@ function renderInspector() {
         el("button", { class: "btn small", onclick: () => commit((pp) => TL.updateClip(pp, c.id, { transform: TL.defaultTransform() })) }, "Reset"))));
   }
 
+  if (c.kind === "video" || c.kind === "audio") {
+    const sp = TL.speedOf(c);
+    const speedInput = el("input", { type: "number", min: 0.1, max: 10, step: 0.05, value: sp });
+    speedInput.addEventListener("change", () => commit((pp) => TL.setSpeed(pp, c.id, +speedInput.value)));
+    sections.push(el("section", {},
+      el("h4", {}, "Kecepatan"),
+      el("div", { class: "btn-row" }, [0.5, 0.75, 1, 1.25, 1.5, 2, 3].map((v) => el("button", {
+        class: "btn small" + (Math.abs(sp - v) < 1e-3 ? " primary" : ""),
+        onclick: () => commit((pp) => TL.setSpeed(pp, c.id, v)),
+      }, `${v}x`))),
+      field("Kustom", el("div", { class: "ctl" }, speedInput, el("span", { class: "unit" }, "x"))),
+      el("p", { class: "hint" }, "Durasi di timeline ikut berubah dan klip sesudahnya bergeser. Suara dipercepat tanpa mengubah nada.")));
+  }
+
   if (c.kind === "audio" || (c.kind === "video" && asset && asset.has_audio)) {
     sections.push(el("section", {},
       el("h4", {}, "Audio"),

@@ -51,6 +51,7 @@ pub struct ExportPlan {
 
 struct Visual {
     input: usize,
+    speed: f64,
     start: f64,
     end: f64,
     place: Placement,
@@ -59,11 +60,30 @@ struct Visual {
 
 struct AudioSrc {
     input: usize,
+    speed: f64,
     duration: f64,
     start: f64,
     volume: f64,
     fade_in: f64,
     fade_out: f64,
+}
+
+/// atempo menerima 0.5..100; kecepatan di bawah 0.5 dirantai (0.25 = 0.5 x 0.5).
+fn atempo_chain(speed: f64) -> String {
+    let mut parts = vec![];
+    let mut s = speed;
+    while s < 0.5 - 1e-9 {
+        parts.push("atempo=0.5".to_string());
+        s /= 0.5;
+    }
+    while s > 100.0 + 1e-9 {
+        parts.push("atempo=100".to_string());
+        s /= 100.0;
+    }
+    if (s - 1.0).abs() > 1e-6 {
+        parts.push(format!("atempo={}", f(s)));
+    }
+    parts.join(",")
 }
 
 fn f(v: f64) -> String {
@@ -128,7 +148,7 @@ pub fn build_plan(project: &Project, opts: &ExportOptions) -> Result<ExportPlan,
                 if clip.source_in > 0.0 {
                     args.extend(["-ss", &f(clip.source_in)].map(String::from));
                 }
-                args.extend(["-t", &f(clip.duration)].map(String::from));
+                args.extend(["-t", &f(clip.source_duration())].map(String::from));
                 if !want_video {
                     args.push("-vn".into());
                 }
@@ -139,11 +159,12 @@ pub fn build_plan(project: &Project, opts: &ExportOptions) -> Result<ExportPlan,
             }
             if want_video {
                 let pl = place(w, h, asset.width, asset.height, clip.fit, &clip.transform);
-                visuals.push(Visual { input, start: clip.start, end: clip.end(), place: pl, opacity: clip.transform.opacity.clamp(0.0, 1.0) });
+                visuals.push(Visual { input, speed: clip.effective_speed(), start: clip.start, end: clip.end(), place: pl, opacity: clip.transform.opacity.clamp(0.0, 1.0) });
             }
             if want_audio {
                 audios.push(AudioSrc {
                     input,
+                    speed: clip.effective_speed(),
                     duration: clip.duration,
                     start: clip.start,
                     volume: clip.volume,
@@ -165,7 +186,11 @@ pub fn build_plan(project: &Project, opts: &ExportOptions) -> Result<ExportPlan,
         if v.opacity < 0.999 {
             chain.push_str(&format!(",colorchannelmixer=aa={}", f(v.opacity)));
         }
-        chain.push_str(&format!(",setpts=PTS-STARTPTS+{}/TB[v{i}]", f(v.start)));
+        if (v.speed - 1.0).abs() > 1e-6 {
+            chain.push_str(&format!(",setpts=(PTS-STARTPTS)/{}+{}/TB[v{i}]", f(v.speed), f(v.start)));
+        } else {
+            chain.push_str(&format!(",setpts=PTS-STARTPTS+{}/TB[v{i}]", f(v.start)));
+        }
         g.push(chain);
         g.push(format!(
             "[b{i}][v{i}]overlay=x={}:y={}:format=rgb:eof_action=pass:enable='between(t,{},{})'[b{}]",
@@ -192,8 +217,13 @@ pub fn build_plan(project: &Project, opts: &ExportOptions) -> Result<ExportPlan,
             let mut chain = format!(
                 "[{}:a]atrim=0:{},asetpts=PTS-STARTPTS,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo",
                 a.input,
-                f(a.duration)
+                f(a.duration * a.speed)
             );
+            let tempo = atempo_chain(a.speed);
+            if !tempo.is_empty() {
+                chain.push(',');
+                chain.push_str(&tempo);
+            }
             if (a.volume - 1.0).abs() > 1e-6 {
                 chain.push_str(&format!(",volume={}", f(a.volume)));
             }
@@ -322,6 +352,32 @@ mod tests {
         let ass = plan.ass.unwrap();
         assert!(!ass.contains("Hai"), "teks di track tersembunyi tidak dirender");
         assert!(ass.contains("YO"));
+    }
+
+    #[test]
+    fn speed_changes_source_length_video_pts_and_audio_tempo() {
+        let mut p = project();
+        p.tracks[0].clips[0].speed = 2.0; // 4 detik di timeline = 8 detik sumber
+        p.tracks[2].clips[0].speed = 0.25;
+        let plan = build_plan(&p, &opts()).unwrap();
+        let a = plan.args.join(" ");
+        assert!(a.contains("-ss 2.5 -t 8 -i C:/media/a.mp4"));
+        assert!(a.contains("-t 0.375 -vn -i C:/sfx/boom.mp3"));
+        let g = plan.filter_script;
+        assert!(g.contains(",setpts=(PTS-STARTPTS)/2+0/TB[v0]"));
+        assert!(g.contains("[2:a]atrim=0:8,asetpts=PTS-STARTPTS,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,atempo=2,volume=0.5"));
+        assert!(g.contains("atrim=0:0.375,asetpts=PTS-STARTPTS,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,atempo=0.5,atempo=0.5,afade"));
+        // gambar tidak terpengaruh speed
+        p.tracks[1].clips[0].speed = 3.0;
+        assert!(build_plan(&p, &opts()).unwrap().args.join(" ").contains("-loop 1 -framerate 30 -t 2 -i C:/meme/x.png"));
+    }
+
+    #[test]
+    fn atempo_chain_ranges() {
+        assert_eq!(atempo_chain(1.0), "");
+        assert_eq!(atempo_chain(1.5), "atempo=1.5");
+        assert_eq!(atempo_chain(0.3), "atempo=0.5,atempo=0.6");
+        assert_eq!(atempo_chain(0.1), "atempo=0.5,atempo=0.5,atempo=0.5,atempo=0.8");
     }
 
     #[test]

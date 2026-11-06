@@ -174,8 +174,9 @@
         if (clip.kind === "video" && asset.filmstrip) {
           const full = this.timeToX(asset.duration || clip.duration);
           bg.style.backgroundImage = `url("${this.host.src(asset.filmstrip.path)}")`;
-          bg.style.backgroundSize = `${full}px 100%`;
-          bg.style.backgroundPosition = `${-this.timeToX(clip.in)}px 0`;
+          const sp = TL.speedOf(clip);
+          bg.style.backgroundSize = `${full / sp}px 100%`;
+          bg.style.backgroundPosition = `${-this.timeToX(clip.in) / sp}px 0`;
           bg.style.backgroundRepeat = "no-repeat";
         } else if (clip.kind === "image") {
           bg.style.backgroundImage = `url("${this.host.src(asset.proxy || asset.path)}")`;
@@ -187,16 +188,18 @@
           const wave = el("div", { class: "clip-wave" });
           const full = this.timeToX(asset.duration || clip.duration);
           wave.style.backgroundImage = `url("${this.host.src(asset.waveform)}")`;
-          wave.style.backgroundSize = `${full}px 100%`;
-          wave.style.backgroundPosition = `${-this.timeToX(clip.in)}px 0`;
+          const ws = TL.speedOf(clip);
+          wave.style.backgroundSize = `${full / ws}px 100%`;
+          wave.style.backgroundPosition = `${-this.timeToX(clip.in) / ws}px 0`;
           node.append(wave);
         }
       }
       node.prepend(bg);
       node.append(el("div", { class: "clip-label" }, clip.kind === "text" ? "T  " : "", name));
-      if (clip.kind !== "text" && clip.kind !== "image" && Math.abs(clip.volume - 1) > 1e-3) {
-        node.append(el("div", { class: "clip-vol" }, `${Math.round(clip.volume * 100)}%`));
-      }
+      const badges = [];
+      if (Math.abs(TL.speedOf(clip) - 1) > 1e-3) badges.push(`${+TL.speedOf(clip).toFixed(2)}x`);
+      if (clip.kind !== "text" && clip.kind !== "image" && Math.abs(clip.volume - 1) > 1e-3) badges.push(`${Math.round(clip.volume * 100)}%`);
+      if (badges.length) node.append(el("div", { class: "clip-vol" }, badges.join(" · ")));
       if (clip.fade_in > 0) node.append(el("div", { class: "fade in", style: `width:${this.timeToX(clip.fade_in)}px` }));
       if (clip.fade_out > 0) node.append(el("div", { class: "fade out", style: `width:${this.timeToX(clip.fade_out)}px` }));
       node.append(el("div", { class: "h-l", title: "Pangkas awal" }), el("div", { class: "h-r", title: "Pangkas akhir" }));

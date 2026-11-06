@@ -107,6 +107,8 @@ pub struct Clip {
     /// Offset di dalam file sumber, detik.
     #[serde(rename = "in")]
     pub source_in: f64,
+    /// Kecepatan putar (1 = normal). Klip memakai `duration * speed` detik dari sumber.
+    pub speed: f64,
     pub volume: f64,
     pub muted: bool,
     pub fade_in: f64,
@@ -125,6 +127,7 @@ impl Default for Clip {
             start: 0.0,
             duration: 0.0,
             source_in: 0.0,
+            speed: 1.0,
             volume: 1.0,
             muted: false,
             fade_in: 0.0,
@@ -139,6 +142,20 @@ impl Default for Clip {
 impl Clip {
     pub fn end(&self) -> f64 {
         self.start + self.duration
+    }
+
+    /// Kecepatan yang aman dipakai (gambar dan teks selalu 1).
+    pub fn effective_speed(&self) -> f64 {
+        if matches!(self.kind, ClipKind::Image | ClipKind::Text) || !self.speed.is_finite() || self.speed <= 0.0 {
+            1.0
+        } else {
+            self.speed.clamp(0.1, 10.0)
+        }
+    }
+
+    /// Panjang bagian sumber yang dipakai klip ini (detik).
+    pub fn source_duration(&self) -> f64 {
+        self.duration * self.effective_speed()
     }
 }
 

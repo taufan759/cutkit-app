@@ -299,7 +299,9 @@
           const m = this._mediaFor(clip, asset);
           const el = m.el;
           const local = inRange ? t - clip.start : 0;
-          const target = clip.in + local;
+          const speed = TL.speedOf(clip);
+          const target = clip.in + local * speed;
+          if (el.playbackRate !== speed) el.playbackRate = speed;
           const audible = !track.muted && !clip.muted && clip.volume > 0;
           el.muted = !audible;
           el.volume = Math.max(0, Math.min(1, clip.volume * TL.fadeGain(clip, local)));
@@ -308,7 +310,7 @@
             if (el.paused) {
               if (Math.abs(el.currentTime - target) > 0.05) el.currentTime = target;
               el.play().catch(() => {});
-            } else if (Math.abs(el.currentTime - target) > DRIFT) {
+            } else if (Math.abs(el.currentTime - target) > DRIFT * speed) {
               el.currentTime = target;
             }
           } else {

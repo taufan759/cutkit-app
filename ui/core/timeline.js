@@ -91,6 +91,7 @@
     c.start = +c.start || 0;
     c.duration = +c.duration || 0;
     c.in = +c.in || 0;
+    c.speed = +c.speed > 0 ? +c.speed : 1;
     c.volume = c.volume == null ? 1 : +c.volume;
     c.muted = !!c.muted;
     c.fade_in = +c.fade_in || 0;
@@ -107,6 +108,15 @@
   }
 
   function clipEnd(c) { return c.start + c.duration; }
+
+  /** Kecepatan efektif (gambar dan teks selalu 1), sama dengan Clip::effective_speed di Rust. */
+  function speedOf(c) {
+    if (c.kind === "image" || c.kind === "text" || !(c.speed > 0)) return 1;
+    return Math.min(10, Math.max(0.1, c.speed));
+  }
+
+  /** Posisi di sumber untuk waktu timeline `t` di dalam klip. */
+  function sourceTime(c, t) { return c.in + (t - c.start) * speedOf(c); }
 
   function duration(p) {
     let d = 0;
@@ -278,7 +288,7 @@
     right.id = uid(clip.kind === "text" ? "t" : "c");
     right.start = round(time);
     right.duration = round(clip.duration - offset);
-    right.in = clip.kind === "video" || clip.kind === "audio" ? round(clip.in + offset) : clip.in;
+    right.in = clip.kind === "video" || clip.kind === "audio" ? round(clip.in + offset * speedOf(clip)) : clip.in;
     right.fade_in = 0;
     clip.duration = offset;
     clip.fade_out = 0;
@@ -298,17 +308,18 @@
     const prevEnd = track.clips.filter((c) => c.id !== clip.id && clipEnd(c) <= clip.start + EPS).reduce((m, c) => Math.max(m, clipEnd(c)), 0);
     const nextStart = track.clips.filter((c) => c.id !== clip.id && c.start >= clipEnd(clip) - EPS).reduce((m, c) => Math.min(m, c.start), Infinity);
     const timed = clip.kind === "video" || clip.kind === "audio";
+    const sp = speedOf(clip);
     if (edge === "start") {
       const end = clipEnd(clip);
       let lo = prevEnd;
-      if (timed) lo = Math.max(lo, clip.start - clip.in);
+      if (timed) lo = Math.max(lo, clip.start - clip.in / sp);
       const t = clamp(time, lo, end - MIN_DURATION);
       const delta = t - clip.start;
-      if (timed) clip.in = round(Math.max(0, clip.in + delta));
+      if (timed) clip.in = round(Math.max(0, clip.in + delta * sp));
       clip.start = round(t);
       clip.duration = round(end - t);
     } else {
-      const limit = timed ? sourceLimit(p, clip) - clip.in : Infinity;
+      const limit = timed ? (sourceLimit(p, clip) - clip.in) / sp : Infinity;
       const hi = Math.min(nextStart, clip.start + limit);
       const t = clamp(time, clip.start + MIN_DURATION, hi);
       clip.duration = round(t - clip.start);
@@ -394,6 +405,25 @@
     clip.fade_out = clamp(+clip.fade_out || 0, 0, clip.duration);
     clip.transform.opacity = clamp(+clip.transform.opacity, 0, 1);
     clip.transform.scale = clamp(+clip.transform.scale || 0.01, 0.01, 20);
+    return clip;
+  }
+
+  /**
+   * Mengubah kecepatan klip video/audio. Bagian sumber yang dipakai tetap sama,
+   * jadi durasi di timeline berubah; klip sesudahnya di track yang sama ikut bergeser.
+   */
+  function setSpeed(p, clipId, speed) {
+    const { track, clip } = mustFind(p, clipId);
+    if (clip.kind !== "video" && clip.kind !== "audio") throw new Error("Kecepatan hanya untuk klip video dan audio.");
+    const next = clamp(+speed || 1, 0.1, 10);
+    const span = clip.duration * speedOf(clip);
+    const oldEnd = clipEnd(clip);
+    clip.speed = round(next);
+    clip.duration = round(Math.max(MIN_DURATION, span / next));
+    const delta = clipEnd(clip) - oldEnd;
+    for (const c of track.clips) if (c !== clip && c.start >= oldEnd - EPS) c.start = round(c.start + delta);
+    clip.fade_in = Math.min(clip.fade_in, clip.duration);
+    clip.fade_out = Math.min(clip.fade_out, clip.duration);
     return clip;
   }
 
@@ -583,7 +613,7 @@
   }
 
   return {
-    allocate, snapCuts, autoAssemble,
+    allocate, snapCuts, autoAssemble, speedOf, sourceTime, setSpeed,
     MIN_DURATION, STILL_DURATION, RATIOS,
     uid, newProject, normalize, normalizeClip, defaultTextStyle, defaultCaptionStyle, defaultTransform,
     clipEnd, duration, getTrack, getAsset, findClip, trackAccepts, overlaps, findFreeStart,

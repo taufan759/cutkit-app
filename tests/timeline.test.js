@@ -238,3 +238,25 @@ test("autoAssemble: caption lebih panjang dari voice over tidak terpotong", () =
   assert.equal(T.duration(p), 4);
   assert.equal(p.tracks.find((t) => t.kind === "audio").clips[0].duration, 1, "voice over tetap sepanjang aslinya");
 });
+
+test("kecepatan: setSpeed mengubah durasi, menggeser klip sesudahnya, split dan trim memakai skala sumber", () => {
+  const { p, c1, c2 } = setup();
+  T.setSpeed(p, c1.id, 2);
+  near(c1.duration, 5);
+  near(c2.start, 5, "klip sesudahnya ikut maju");
+  near(T.sourceTime(c1, 2), 4);
+  const right = T.splitClip(p, c1.id, 2);
+  near(right.in, 4, "split: offset sumber = 2 detik x 2");
+  near(right.duration, 3);
+  T.trimClip(p, right.id, "end", 20);
+  near(right.duration, 3, "dibatasi sisa sumber (10 - 4) / 2");
+  T.trimClip(p, right.id, "start", 0);
+  near(right.start, 2, "tidak melewati klip kiri");
+  near(right.in, 4);
+  T.setSpeed(p, c1.id, 0.5);
+  near(c1.duration, 8, "2 detik timeline x 2 = 4 detik sumber, pada 0.5x jadi 8 detik");
+  const img = T.insertClip(p, "v2", T.clipFromAsset(p.assets[1]), 0);
+  assert.throws(() => T.setSpeed(p, img.id, 2), /video dan audio/);
+  assert.equal(T.speedOf({ kind: "image", speed: 3 }), 1);
+  assert.equal(T.speedOf({ kind: "video", speed: 50 }), 10);
+});
