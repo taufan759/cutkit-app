@@ -258,7 +258,7 @@ fn run_step(ffmpeg: &str, work_dir: &Path, step: &ExportStep, cancel: Arc<Atomic
     run_ffmpeg_progress(ffmpeg, work_dir, &step.args, cancel, |sec, sp| on_progress(sec, sp))
 }
 
-fn run_ffmpeg_progress(ffmpeg: &str, work_dir: &Path, args: &[String], cancel: Arc<AtomicBool>, mut on_progress: impl FnMut(f64, &str)) -> Result<(), String> {
+pub fn run_ffmpeg_progress(ffmpeg: &str, work_dir: &Path, args: &[String], cancel: Arc<AtomicBool>, mut on_progress: impl FnMut(f64, &str)) -> Result<(), String> {
     let mut child = quiet(Command::new(ffmpeg).args(args).current_dir(work_dir))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

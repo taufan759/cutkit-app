@@ -19,6 +19,49 @@ struct AppState {
     tools: Mutex<Option<Tools>>,
     cache_dir: PathBuf,
     export_cancel: Mutex<Option<Arc<AtomicBool>>>,
+    /// Pembatal unduhan model / transkripsi yang sedang berjalan.
+    ai_cancel: Mutex<Option<Arc<AtomicBool>>>,
+    settings_path: PathBuf,
+    default_models_dir: PathBuf,
+}
+
+#[derive(Serialize, serde::Deserialize, Clone, Default)]
+#[serde(default)]
+struct Settings {
+    /// Folder model AI (Whisper, Piper, dll.). Kosong = folder data aplikasi.
+    models_dir: String,
+}
+
+impl AppState {
+    fn settings(&self) -> Settings {
+        std::fs::read_to_string(&self.settings_path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+    }
+
+    fn models_dir(&self) -> PathBuf {
+        let s = self.settings();
+        if s.models_dir.trim().is_empty() {
+            self.default_models_dir.clone()
+        } else {
+            PathBuf::from(s.models_dir)
+        }
+    }
+
+    /// Satu tugas AI pada satu waktu; mengembalikan flag pembatalnya.
+    fn begin_ai(&self) -> Result<Arc<AtomicBool>, String> {
+        let mut slot = self.ai_cancel.lock().map_err(|e| e.to_string())?;
+        if slot.is_some() {
+            return Err("Masih ada unduhan atau transkripsi yang berjalan.".into());
+        }
+        let flag = Arc::new(AtomicBool::new(false));
+        *slot = Some(flag.clone());
+        Ok(flag)
+    }
+
+    fn end_ai(&self) {
+        if let Ok(mut slot) = self.ai_cancel.lock() {
+            *slot = None;
+        }
+    }
 }
 
 impl AppState {
@@ -322,6 +365,97 @@ async fn make_demo(dir: String, state: State<'_, AppState>) -> Result<cutkit_cor
     .await
 }
 
+#[derive(Serialize)]
+struct ModelStatus {
+    #[serde(flatten)]
+    info: cutkit_core::ai::ModelInfo,
+    installed: bool,
+}
+
+#[derive(Serialize)]
+struct AiInfo {
+    models_dir: String,
+    models: Vec<ModelStatus>,
+}
+
+#[tauri::command]
+fn ai_models(state: State<AppState>) -> AiInfo {
+    let dir = state.models_dir();
+    AiInfo {
+        models_dir: dir.to_string_lossy().to_string(),
+        models: cutkit_core::ai::MODELS.iter().map(|m| ModelStatus { info: *m, installed: cutkit_core::ai::is_installed(&dir, m) }).collect(),
+    }
+}
+
+#[tauri::command]
+fn set_models_dir(path: String, state: State<AppState>) -> Result<(), String> {
+    let mut s = state.settings();
+    s.models_dir = path;
+    if let Some(dir) = state.settings_path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&state.settings_path, serde_json::to_string_pretty(&s).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+}
+
+/// Mengunduh model; progres lewat event `ai-download` ({ id, got, total }).
+#[tauri::command]
+async fn ai_download(app: AppHandle, id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let m = cutkit_core::ai::model(&id).ok_or("Model tidak dikenal.")?;
+    let dir = state.models_dir();
+    if cutkit_core::ai::is_installed(&dir, m) {
+        return Ok(());
+    }
+    let cancel = state.begin_ai()?;
+    let app2 = app.clone();
+    let result = blocking(move || {
+        cutkit_core::ai::download(m, &dir, cancel, |got, total| {
+            let _ = app2.emit("ai-download", serde_json::json!({ "id": m.id, "got": got, "total": total }));
+        })
+    })
+    .await;
+    state.end_ai();
+    result
+}
+
+#[tauri::command]
+fn ai_cancel(state: State<AppState>) -> Result<(), String> {
+    if let Some(flag) = state.ai_cancel.lock().map_err(|e| e.to_string())?.as_ref() {
+        flag.store(true, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+/// Auto caption satu file (bagian start..start+duration dari sumber) dengan Whisper.
+/// Waktu kata relatif terhadap `start`; progres lewat event `transcribe-progress` ({ seconds }).
+#[tauri::command]
+async fn transcribe(app: AppHandle, path: String, start: f64, duration: f64, model: String, language: String, use_vad: bool, state: State<'_, AppState>) -> Result<Vec<cutkit_core::Word>, String> {
+    let tools = state.tools()?;
+    let dir = state.models_dir();
+    let m = cutkit_core::ai::model(&model).filter(|m| m.kind == "whisper").ok_or("Model Whisper tidak dikenal.")?;
+    if !cutkit_core::ai::is_installed(&dir, m) {
+        return Err(format!("Model {} belum diunduh.", m.label));
+    }
+    let vad = cutkit_core::ai::model("vad-silero").filter(|v| use_vad && cutkit_core::ai::is_installed(&dir, v)).map(|v| v.file);
+    let cancel = state.begin_ai()?;
+    let out_name = format!("cutkit-transcribe-{}.json", std::process::id());
+    let args = cutkit_core::ai::transcribe_args(&path, start, duration, m.file, vad, &language, &out_name);
+    let app2 = app.clone();
+    let result = blocking(move || {
+        let out = dir.join(&out_name);
+        let _ = std::fs::remove_file(&out);
+        let run = ffmpeg::run_ffmpeg_progress(&tools.ffmpeg, &dir, &args, cancel, |sec, _| {
+            let _ = app2.emit("transcribe-progress", serde_json::json!({ "seconds": sec }));
+        });
+        let text = std::fs::read_to_string(&out).unwrap_or_default();
+        let _ = std::fs::remove_file(&out);
+        run.map_err(|e| if e.contains("dibatalkan") { "Transkripsi dibatalkan.".to_string() } else { e })?;
+        Ok(cutkit_core::ai::segments_to_words(&cutkit_core::ai::parse_whisper_json(&text)))
+    })
+    .await;
+    state.end_ai();
+    result
+}
+
 #[tauri::command]
 fn open_path(app: AppHandle, path: String) -> Result<(), String> {
     app.opener().open_path(path, None::<&str>).map_err(|e| e.to_string())
@@ -338,7 +472,16 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let cache_dir = app.path().app_cache_dir().unwrap_or_else(|_| std::env::temp_dir().join("cutkit"));
-            app.manage(AppState { tools: Mutex::new(None), cache_dir, export_cancel: Mutex::new(None) });
+            let config_dir = app.path().app_config_dir().unwrap_or_else(|_| std::env::temp_dir().join("cutkit-config"));
+            let data_dir = app.path().app_local_data_dir().unwrap_or_else(|_| std::env::temp_dir().join("cutkit-data"));
+            app.manage(AppState {
+                tools: Mutex::new(None),
+                cache_dir,
+                export_cancel: Mutex::new(None),
+                ai_cancel: Mutex::new(None),
+                settings_path: config_dir.join("settings.json"),
+                default_models_dir: data_dir.join("models"),
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -360,6 +503,11 @@ fn main() {
             clear_cache,
             install_ffmpeg,
             make_demo,
+            ai_models,
+            set_models_dir,
+            ai_download,
+            ai_cancel,
+            transcribe,
             open_path,
             reveal_path
         ])

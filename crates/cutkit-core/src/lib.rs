@@ -1,6 +1,7 @@
 //! cutkit-core: model proyek CutKit, pembuat ASS, penyusun perintah ffmpeg, dan pelarinya.
 //! Tidak bergantung pada Tauri sehingga semua logika bisa diuji dengan `cargo test`.
 
+pub mod ai;
 pub mod ass;
 pub mod demo;
 pub mod export;

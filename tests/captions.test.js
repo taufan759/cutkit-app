@@ -86,3 +86,30 @@ test("animasi pop: kata aktif mulai 1,25x lalu kembali ke ukuran sorotan dalam 1
   const words = [{ text: "a", start: 0, end: 0.5 }, { text: "b", start: 0.5, end: 1 }];
   assert.ok(Math.abs(C.frameAt(words, { words_per_page: 2, max_line_chars: 9 }, 0.55).since - 0.05) < 1e-9);
 });
+
+test("alignScript: ejaan dari naskah, waktu dari transkripsi", () => {
+  const timed = [
+    { text: "sebap", start: 0, end: 0.4 },
+    { text: "sejara", start: 0.45, end: 1 },
+    { text: "itu", start: 1, end: 1.2 },
+    { text: "eh", start: 1.2, end: 1.3 },
+    { text: "penting", start: 1.4, end: 2 },
+  ];
+  const out = C.alignScript("Sebab sejarah itu sangat penting.", timed);
+  assert.deepEqual(out.map((w) => w.text), ["Sebab", "sejarah", "itu", "sangat", "penting."]);
+  assert.deepEqual([out[0].start, out[1].start, out[4].start], [0, 0.45, 1.4]);
+  assert.ok(out[3].start >= 1.2 && out[3].end <= 1.4 + 1e-9, "kata tanpa pasangan diselipkan di celah");
+  assert.ok(C.similarity("sejara", "sejarah") > 0.8);
+  assert.deepEqual(C.alignScript("", timed), []);
+});
+
+test("alignScript tetap cepat untuk ribuan kata", () => {
+  const timed = [];
+  const words = [];
+  for (let i = 0; i < 3000; i++) { const t = "kata" + (i % 97); words.push(t); timed.push({ text: i % 50 === 0 ? "salah" : t, start: i * 0.4, end: i * 0.4 + 0.3 }); }
+  const t0 = Date.now();
+  const out = C.alignScript(words.join(" "), timed);
+  assert.equal(out.length, 3000);
+  assert.equal(out[1234].start, 1234 * 0.4);
+  assert.ok(Date.now() - t0 < 5000, `terlalu lambat: ${Date.now() - t0} ms`);
+});

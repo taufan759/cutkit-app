@@ -243,5 +243,106 @@
     return JSON.stringify({ words: sortedWords(words).map((w) => ({ text: w.text, start: w.start, end: w.end })) }, null, 2);
   }
 
-  return { PAGE_GAP, POP_FACTOR, POP_MS, activeScale, parseTime, parseSrt, srtToWords, parseWordsJson, textToWords, distribute, sortedWords, paginate, cues, frameAt, toSrt, toWordsJson, srtTime };
+  function normTok(s) {
+    return String(s).toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^\p{L}\p{N}]/gu, "");
+  }
+
+  /** Kemiripan dua kata 0..1 (1 - jarak edit relatif). */
+  function similarity(a, b) {
+    if (a === b) return 1;
+    if (!a.length || !b.length) return 0;
+    const prev = new Array(b.length + 1);
+    for (let j = 0; j <= b.length; j++) prev[j] = j;
+    for (let i = 1; i <= a.length; i++) {
+      let diag = prev[0];
+      prev[0] = i;
+      for (let j = 1; j <= b.length; j++) {
+        const tmp = prev[j];
+        prev[j] = Math.min(prev[j] + 1, prev[j - 1] + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1));
+        diag = tmp;
+      }
+    }
+    return 1 - prev[b.length] / Math.max(a.length, b.length);
+  }
+
+  /**
+   * Menyelaraskan naskah yang benar dengan kata hasil transkripsi (yang waktunya benar).
+   * Hasil: kata-kata naskah dengan waktu dari kata transkripsi yang cocok; kata naskah
+   * tanpa pasangan mendapat waktu dari interpolasi tetangganya. Pencocokan memakai DP
+   * dalam pita di sekitar diagonal supaya tetap ringan untuk video panjang.
+   */
+  function alignScript(script, timed) {
+    const sw = splitWords(script);
+    const tw = sortedWords(timed);
+    if (!sw.length) return [];
+    if (!tw.length) return [];
+    const a = sw.map(normTok);
+    const b = tw.map((w) => normTok(w.text));
+    const n = a.length;
+    const m = b.length;
+    const band = Math.max(60, Math.ceil(Math.abs(n - m) * 1.2) + 40);
+    const center = (i) => Math.round((i * m) / n);
+    const lo = (i) => Math.max(0, center(i) - band);
+    const hi = (i) => Math.min(m, center(i) + band);
+    const INF = 1e9;
+    // cost[i][j] untuk j dalam [lo(i), hi(i)], disimpan per baris.
+    const cost = [];
+    const move = [];
+    for (let i = 0; i <= n; i++) {
+      const l = lo(i), h = hi(i);
+      const row = new Float64Array(h - l + 1).fill(INF);
+      const mv = new Uint8Array(h - l + 1);
+      for (let j = l; j <= h; j++) {
+        let best = INF, how = 0;
+        if (i === 0 && j === 0) best = 0;
+        if (i > 0) {
+          const pl = lo(i - 1), ph = hi(i - 1);
+          const up = j >= pl && j <= ph ? cost[i - 1][j - pl] : INF; // kata naskah tanpa pasangan
+          if (up + 1 < best) { best = up + 1; how = 1; }
+          if (j > 0 && j - 1 >= pl && j - 1 <= ph) {
+            const sim = similarity(a[i - 1], b[j - 1]);
+            const d = cost[i - 1][j - 1 - pl] + (1 - sim) * 1.6;
+            if (d < best) { best = d; how = 3; }
+          }
+        }
+        if (j > 0 && j - 1 >= l) {
+          const left = row[j - 1 - l] + 1; // kata transkripsi tanpa pasangan
+          if (left < best) { best = left; how = 2; }
+        }
+        row[j - l] = best;
+        mv[j - l] = how;
+      }
+      cost.push(row);
+      move.push(mv);
+    }
+    // Telusur balik: pasangan (i -> j) yang mirip dipakai waktunya.
+    const match = new Array(n).fill(-1);
+    let i = n, j = Math.min(m, hi(n));
+    if (j < m) j = hi(n);
+    while (i > 0 || j > 0) {
+      const how = move[i][j - lo(i)];
+      if (how === 3) { if (similarity(a[i - 1], b[j - 1]) >= 0.34) match[i - 1] = j - 1; i--; j--; }
+      else if (how === 1) i--;
+      else if (how === 2) j--;
+      else break;
+    }
+    const out = sw.map((text, k) => (match[k] >= 0 ? { text, start: tw[match[k]].start, end: tw[match[k]].end } : { text, start: NaN, end: NaN }));
+    // Interpolasi kata tanpa pasangan di antara tetangga yang punya waktu.
+    const first = tw[0].start, last = tw[tw.length - 1].end;
+    let k = 0;
+    while (k < out.length) {
+      if (!isNaN(out[k].start)) { k++; continue; }
+      let e = k;
+      while (e < out.length && isNaN(out[e].start)) e++;
+      const from = k > 0 ? out[k - 1].end : first;
+      const to = e < out.length ? out[e].start : last;
+      const span = Math.max(0.05 * (e - k), to - from);
+      const parts = distribute(out.slice(k, e).map((w) => w.text).join(" "), from, from + span);
+      parts.forEach((p, q) => { out[k + q].start = p.start; out[k + q].end = p.end; });
+      k = e;
+    }
+    return out.map((w) => ({ text: w.text, start: round3(w.start), end: round3(Math.max(w.end, w.start + 0.05)) }));
+  }
+
+  return { PAGE_GAP, POP_FACTOR, alignScript, similarity, POP_MS, activeScale, parseTime, parseSrt, srtToWords, parseWordsJson, textToWords, distribute, sortedWords, paginate, cues, frameAt, toSrt, toWordsJson, srtTime };
 });

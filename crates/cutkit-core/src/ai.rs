@@ -1,0 +1,257 @@
+//! Model AI lokal (diunduh sekali, lalu offline): katalog, pengunduh terverifikasi
+//! SHA-256, dan auto caption dengan filter `whisper` ffmpeg (whisper.cpp).
+
+use crate::model::Word;
+use serde::Serialize;
+use sha2::{Digest, Sha256};
+use std::io::{Read, Write};
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+#[derive(Serialize, Clone, Copy, Debug)]
+pub struct ModelInfo {
+    pub id: &'static str,
+    pub kind: &'static str,
+    pub label: &'static str,
+    pub note: &'static str,
+    pub file: &'static str,
+    pub url: &'static str,
+    pub sha256: &'static str,
+    pub size: u64,
+}
+
+/// Ukuran dan hash dari API Hugging Face (ggerganov/whisper.cpp, ggml-org/whisper-vad).
+pub const MODELS: &[ModelInfo] = &[
+    ModelInfo {
+        id: "whisper-base",
+        kind: "whisper",
+        label: "Cepat (base)",
+        note: "60 MB. Paling cepat, akurasi cukup untuk suara jelas.",
+        file: "ggml-base-q5_1.bin",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin",
+        sha256: "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898",
+        size: 59_707_625,
+    },
+    ModelInfo {
+        id: "whisper-small",
+        kind: "whisper",
+        label: "Seimbang (small) — disarankan",
+        note: "190 MB. Akurasi bagus untuk Bahasa Indonesia, kira-kira secepat durasi audio.",
+        file: "ggml-small-q5_1.bin",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin",
+        sha256: "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb",
+        size: 190_085_487,
+    },
+    ModelInfo {
+        id: "whisper-medium",
+        kind: "whisper",
+        label: "Akurat (medium)",
+        note: "539 MB. Paling akurat, sekitar 3x lebih lambat dari small.",
+        file: "ggml-medium-q5_0.bin",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q5_0.bin",
+        sha256: "19fea4b380c3a618ec4723c3eef2eb785ffba0d0538cf43f8f235e7b3b34220f",
+        size: 539_212_467,
+    },
+    ModelInfo {
+        id: "vad-silero",
+        kind: "vad",
+        label: "Deteksi suara (Silero VAD)",
+        note: "0,9 MB. Memotong audio di jeda supaya transkripsi lebih rapi dan cepat.",
+        file: "ggml-silero-v6.2.0.bin",
+        url: "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin",
+        sha256: "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987",
+        size: 885_098,
+    },
+];
+
+pub fn model(id: &str) -> Option<&'static ModelInfo> {
+    MODELS.iter().find(|m| m.id == id)
+}
+
+/// Model dianggap terpasang bila file ada dan ukurannya cocok (hash dicek saat unduh).
+pub fn is_installed(dir: &Path, m: &ModelInfo) -> bool {
+    std::fs::metadata(dir.join(m.file)).map(|md| md.len() == m.size).unwrap_or(false)
+}
+
+/// Mengunduh model ke `dir` lewat file .part, memverifikasi ukuran dan SHA-256, lalu mengganti nama.
+pub fn download(m: &ModelInfo, dir: &Path, cancel: Arc<AtomicBool>, mut on_progress: impl FnMut(u64, u64)) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("Tidak bisa membuat folder model: {e}"))?;
+    let part = dir.join(format!("{}.part", m.file));
+    let dest = dir.join(m.file);
+    let resp = ureq::get(m.url).call().map_err(|e| format!("Gagal mengunduh {}: {e}", m.file))?;
+    let mut reader = resp.into_body().into_reader();
+    let mut file = std::fs::File::create(&part).map_err(|e| e.to_string())?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 256 * 1024];
+    let mut got: u64 = 0;
+    let mut last_report = std::time::Instant::now();
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            drop(file);
+            let _ = std::fs::remove_file(&part);
+            return Err("Unduhan dibatalkan.".into());
+        }
+        let n = reader.read(&mut buf).map_err(|e| format!("Unduhan terputus: {e}"))?;
+        if n == 0 {
+            break;
+        }
+        file.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+        hasher.update(&buf[..n]);
+        got += n as u64;
+        if last_report.elapsed().as_millis() > 250 {
+            on_progress(got, m.size);
+            last_report = std::time::Instant::now();
+        }
+    }
+    file.flush().map_err(|e| e.to_string())?;
+    drop(file);
+    let hash: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    if got != m.size || hash != m.sha256 {
+        let _ = std::fs::remove_file(&part);
+        return Err(format!("File {} rusak atau tidak cocok (ukuran {got}, hash {hash}). Coba unduh lagi.", m.file));
+    }
+    std::fs::rename(&part, &dest).map_err(|e| e.to_string())?;
+    on_progress(m.size, m.size);
+    Ok(())
+}
+
+/// Argumen ffmpeg untuk transkripsi `media` mulai `start` detik sepanjang `duration` detik.
+/// Dijalankan dengan direktori kerja = folder model, jadi nama file di filter tidak perlu di-escape.
+pub fn transcribe_args(media: &str, start: f64, duration: f64, model_file: &str, vad_file: Option<&str>, language: &str, out_file: &str) -> Vec<String> {
+    let lang: String = language.chars().filter(|c| c.is_ascii_alphabetic()).collect();
+    let lang = if lang.is_empty() { "auto".to_string() } else { lang };
+    let mut filter = format!("aresample=16000,aformat=sample_fmts=flt:channel_layouts=mono,whisper=model={model_file}:language={lang}:queue=20:destination={out_file}:format=json:max_len=1");
+    if let Some(v) = vad_file {
+        filter.push_str(&format!(":vad_model={v}"));
+    }
+    let mut a: Vec<String> = ["-hide_banner", "-nostats", "-loglevel", "error", "-progress", "pipe:1"].iter().map(|s| s.to_string()).collect();
+    if start > 0.0 {
+        a.extend(["-ss".to_string(), format!("{start:.3}")]);
+    }
+    if duration > 0.0 {
+        a.extend(["-t".to_string(), format!("{duration:.3}")]);
+    }
+    a.extend(["-i", media, "-vn", "-map", "0:a:0", "-af", &filter, "-f", "null", "-"].iter().map(|s| s.to_string()));
+    a
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Segment {
+    pub start: f64,
+    pub end: f64,
+    pub text: String,
+}
+
+/// Mengurai keluaran `format=json` filter whisper: satu objek {"start":ms,"end":ms,"text":"..."} per segmen.
+/// Teks tidak di-escape oleh ffmpeg, jadi diurai manual (bukan lewat parser JSON).
+pub fn parse_whisper_json(text: &str) -> Vec<Segment> {
+    let mut out = vec![];
+    let mut rest = text;
+    while let Some(i) = rest.find("{\"start\":") {
+        rest = &rest[i + 9..];
+        let Some(comma) = rest.find(",\"end\":") else { break };
+        let start: f64 = rest[..comma].trim().parse().unwrap_or(0.0);
+        rest = &rest[comma + 7..];
+        let Some(comma) = rest.find(",\"text\":\"") else { break };
+        let end: f64 = rest[..comma].trim().parse().unwrap_or(0.0);
+        rest = &rest[comma + 9..];
+        // Teks berakhir di "} yang diikuti baris baru, koma, atau akhir file.
+        let mut close = None;
+        let mut search = 0;
+        while let Some(j) = rest[search..].find("\"}") {
+            let k = search + j;
+            let after = rest[k + 2..].trim_start_matches(['\r', ' ']);
+            if after.is_empty() || after.starts_with('\n') || after.starts_with(',') || after.starts_with('{') {
+                close = Some(k);
+                break;
+            }
+            search = k + 2;
+        }
+        let Some(k) = close else { break };
+        let t = rest[..k].to_string();
+        rest = &rest[k + 2..];
+        out.push(Segment { start: start / 1000.0, end: end / 1000.0, text: t });
+    }
+    out
+}
+
+fn is_punct_only(s: &str) -> bool {
+    !s.trim().is_empty() && s.trim().chars().all(|c| !c.is_alphanumeric())
+}
+
+/// Segmen per kata (max_len=1) dirakit jadi daftar kata. ffmpeg memangkas spasi teks segmen, jadi
+/// tiap segmen = kata sendiri; tanda baca yang berdiri sendiri menempel ke kata sebelumnya, segmen
+/// berisi beberapa kata dibagi rata menurut panjang huruf. Penanda non-ucapan seperti [MUSIK] dibuang.
+pub fn segments_to_words(segs: &[Segment]) -> Vec<Word> {
+    let mut words: Vec<Word> = vec![];
+    for s in segs {
+        let raw = s.text.replace('\n', " ");
+        let trimmed = raw.trim();
+        if trimmed.is_empty() || (trimmed.starts_with('[') && trimmed.ends_with(']')) || (trimmed.starts_with('(') && trimmed.ends_with(')')) {
+            continue;
+        }
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if parts.len() == 1 && is_punct_only(parts[0]) && !words.is_empty() {
+            let last = words.last_mut().unwrap();
+            last.text.push_str(parts[0]);
+            last.end = last.end.max(s.end);
+            continue;
+        }
+        let span = (s.end - s.start).max(0.0);
+        let weights: Vec<f64> = parts.iter().map(|p| p.chars().filter(|c| c.is_alphanumeric()).count().max(1) as f64 + 1.0).collect();
+        let total: f64 = weights.iter().sum();
+        let mut t = s.start;
+        for (p, wgt) in parts.iter().zip(&weights) {
+            let d = span * wgt / total;
+            words.push(Word { text: p.to_string(), start: t, end: t + d });
+            t += d;
+        }
+    }
+    for w in &mut words {
+        if w.end <= w.start {
+            w.end = w.start + 0.05;
+        }
+        w.start = (w.start * 1000.0).round() / 1000.0;
+        w.end = (w.end * 1000.0).round() / 1000.0;
+    }
+    words
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn catalog_and_install_check() {
+        assert!(model("whisper-small").unwrap().url.ends_with("ggml-small-q5_1.bin"));
+        assert!(MODELS.iter().all(|m| m.sha256.len() == 64 && m.url.starts_with("https://huggingface.co/")));
+        let dir = std::env::temp_dir().join("cutkit-ai-test");
+        let _ = std::fs::create_dir_all(&dir);
+        let vad = model("vad-silero").unwrap();
+        std::fs::write(dir.join(vad.file), b"pendek").unwrap();
+        assert!(!is_installed(&dir, vad), "ukuran tidak cocok = belum terpasang");
+    }
+
+    #[test]
+    fn transcribe_command() {
+        let a = transcribe_args("D:\\VO\\narasi.mp3", 1.5, 10.0, "ggml-small-q5_1.bin", Some("ggml-silero-v6.2.0.bin"), "id", "out-1.json").join(" ");
+        assert!(a.contains("-ss 1.500 -t 10.000 -i D:\\VO\\narasi.mp3 -vn -map 0:a:0 -af aresample=16000,aformat=sample_fmts=flt:channel_layouts=mono,whisper=model=ggml-small-q5_1.bin:language=id:queue=20:destination=out-1.json:format=json:max_len=1:vad_model=ggml-silero-v6.2.0.bin -f null -"), "{a}");
+        let b = transcribe_args("x.wav", 0.0, 0.0, "m.bin", None, "id:evil", "o.json").join(" ");
+        assert!(b.contains("language=idevil:") && !b.contains("-ss") && !b.contains("vad_model"));
+    }
+
+    #[test]
+    fn parses_segments_with_unescaped_text() {
+        // Format nyata ffmpeg 9 (teks sudah dipangkas), plus kasus tepi: koma sendiri, kutip tanpa escape, penanda musik.
+        let json = "{\"start\":0,\"end\":420,\"text\":\"Halo\"}\n{\"start\":420,\"end\":900,\"text\":\"semua\"}\n{\"start\":900,\"end\":950,\"text\":\",\"}\n{\"start\":1000,\"end\":1500,\"text\":\"kata \"kutip\"}\"}\n{\"start\":1500,\"end\":2000,\"text\":\"[MUSIK]\"}\n";
+        let segs = parse_whisper_json(json);
+        assert_eq!(segs.len(), 5);
+        assert_eq!(segs[3].text, "kata \"kutip\"}");
+        let words = segments_to_words(&segs);
+        let texts: Vec<&str> = words.iter().map(|w| w.text.as_str()).collect();
+        assert_eq!(texts, vec!["Halo", "semua,", "kata", "\"kutip\"}"]);
+        assert_eq!((words[1].start, words[1].end), (0.42, 0.95));
+        assert!(words[2].end <= words[3].start + 1e-9);
+    }
+}

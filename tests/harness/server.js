@@ -37,6 +37,14 @@ function probe(file) {
 }
 
 const CACHE = path.join(require("node:os").tmpdir(), "cutkit-harness");
+const MODELS_DIR = process.env.CUTKIT_MODELS || "D:/DevTools/cutkit-models";
+// Sama dengan katalog di crates/cutkit-core/src/ai.rs (hanya untuk harness).
+const AI_MODELS = [
+  { id: "whisper-base", kind: "whisper", label: "Cepat (base)", note: "60 MB", file: "ggml-base-q5_1.bin", size: 59707625 },
+  { id: "whisper-small", kind: "whisper", label: "Seimbang (small) — disarankan", note: "190 MB", file: "ggml-small-q5_1.bin", size: 190085487 },
+  { id: "whisper-medium", kind: "whisper", label: "Akurat (medium)", note: "539 MB", file: "ggml-medium-q5_0.bin", size: 539212467 },
+  { id: "vad-silero", kind: "vad", label: "Deteksi suara (Silero VAD)", note: "0,9 MB", file: "ggml-silero-v6.2.0.bin", size: 885098 },
+];
 fs.mkdirSync(CACHE, { recursive: true });
 
 const commands = {
@@ -75,6 +83,38 @@ const commands = {
     const f = (n) => path.join(dir, n);
     if (!fs.existsSync(f("01-narasi.wav"))) throw new Error("Jalankan dulu: cargo test -p cutkit-core --test export_real");
     return { voice: f("01-narasi.wav"), music: f("musik.wav"), visuals: ["01-latar.png", "02-klip.mp4", "03-latar.png", "04-klip.mp4", "05-latar.png"].map(f), script: "Halo semua! Ini contoh proyek CutKit. Coba potong klip, tambah meme dan caption, lalu ekspor video kamu." };
+  },
+  // AI: memakai model asli di folder model bila ada (unduh lewat aplikasi; harness tidak mengunduh).
+  ai_models: () => ({ models_dir: MODELS_DIR, models: AI_MODELS.map((m) => ({ ...m, installed: fs.existsSync(path.join(MODELS_DIR, m.file)) && fs.statSync(path.join(MODELS_DIR, m.file)).size === m.size })) }),
+  set_models_dir: () => null,
+  ai_cancel: () => null,
+  ai_download: ({ id }) => {
+    const m = AI_MODELS.find((x) => x.id === id);
+    if (!(fs.existsSync(path.join(MODELS_DIR, m.file)) && fs.statSync(path.join(MODELS_DIR, m.file)).size === m.size)) throw new Error("Harness tidak mengunduh model; letakkan file di " + MODELS_DIR);
+    return null;
+  },
+  transcribe: ({ path: media, start, duration, model, language, useVad }) => {
+    const m = AI_MODELS.find((x) => x.id === model);
+    const vad = AI_MODELS.find((x) => x.id === "vad-silero");
+    const out = "cutkit-harness-transcribe.json";
+    let filter = `aresample=16000,aformat=sample_fmts=flt:channel_layouts=mono,whisper=model=${m.file}:language=${language}:queue=20:destination=${out}:format=json:max_len=1`;
+    if (useVad && fs.existsSync(path.join(MODELS_DIR, vad.file))) filter += `:vad_model=${vad.file}`;
+    const args = ["-hide_banner", "-nostats", "-loglevel", "error"];
+    if (start > 0) args.push("-ss", start.toFixed(3));
+    if (duration > 0) args.push("-t", duration.toFixed(3));
+    args.push("-i", media, "-vn", "-map", "0:a:0", "-af", filter, "-f", "null", "-");
+    execFileSync(FFMPEG, args, { cwd: MODELS_DIR });
+    const text = fs.readFileSync(path.join(MODELS_DIR, out), "utf8");
+    fs.unlinkSync(path.join(MODELS_DIR, out));
+    const segs = [...text.matchAll(/\{"start":(\d+),"end":(\d+),"text":"(.*?)"\}\s*(?:\n|$)/g)].map((x) => ({ start: +x[1] / 1000, end: +x[2] / 1000, text: x[3] }));
+    const words = [];
+    for (const sg of segs) {
+      const t = sg.text.trim();
+      if (!t || /^\[.*\]$/.test(t)) continue;
+      if (/^[^\p{L}\p{N}]+$/u.test(t) && words.length) { words[words.length - 1].text += t; words[words.length - 1].end = sg.end; continue; }
+      words.push({ text: t, start: sg.start, end: sg.end });
+    }
+    return words;
   },
   open_path: () => null,
   reveal_path: () => null,

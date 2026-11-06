@@ -8,3 +8,5 @@ description = "Model proyek, penyusun perintah ffmpeg, dan pembuat ASS untuk Cut
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
+ureq = "3"

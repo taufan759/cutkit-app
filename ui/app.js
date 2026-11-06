@@ -816,6 +816,115 @@ function applyCaptionPreset(p, preset) {
   Object.assign(p.captions.style, st);
 }
 
+/* ---------- auto caption (Whisper offline) ---------- */
+
+const LANGS = [["id", "Indonesia"], ["en", "Inggris"], ["auto", "Deteksi otomatis"]];
+
+/** Track yang punya klip bersuara, untuk sumber auto caption. */
+function audibleTracks(p) {
+  return p.tracks
+    .map((t) => ({ t, clips: t.clips.filter((c) => (c.kind === "audio" || c.kind === "video") && TL.getAsset(p, c.asset_id)?.has_audio && !c.muted) }))
+    .filter((x) => x.clips.length);
+}
+
+/** Memastikan model terpasang; mengunduh dengan progres bila belum. */
+async function ensureModels(ids, onStatus) {
+  const info = await invoke("ai_models");
+  for (const id of ids) {
+    const m = info.models.find((x) => x.id === id);
+    if (!m || m.installed) continue;
+    onStatus(`Mengunduh ${m.label} (${fmtBytes(m.size)})…`, 0);
+    const un = await tauri.event.listen("ai-download", (ev) => {
+      if (ev.payload.id === id) onStatus(`Mengunduh ${m.label}: ${fmtBytes(ev.payload.got)} dari ${fmtBytes(ev.payload.total)}`, ev.payload.got / ev.payload.total);
+    });
+    try { await invoke("ai_download", { id }); } finally { un(); }
+  }
+}
+
+async function autoCaptionDialog() {
+  const p = state.project;
+  const sources = audibleTracks(p);
+  if (!sources.length) return toast("Belum ada klip bersuara di timeline. Tambahkan voice over atau video dulu.", true);
+  let info;
+  try { info = await invoke("ai_models"); } catch (e) { return toast(errMsg(e), true); }
+  const whisper = info.models.filter((m) => m.kind === "whisper");
+  const pref = localStorage.getItem("cutkit.whisper") || "whisper-small";
+  const audioFirst = sources.find((x) => x.t.kind === "audio") || sources[0];
+  const srcSel = el("select", {}, sources.map((x) => el("option", { value: x.t.id, selected: x === audioFirst }, `${x.t.name} · ${x.clips.length} klip`)));
+  const modelSel = el("select", {}, whisper.map((m) => el("option", { value: m.id, selected: m.id === pref }, `${m.label}${m.installed ? " ✓" : ` · unduh ${fmtBytes(m.size)}`}`)));
+  const note = el("p", { class: "hint" });
+  const updNote = () => { const m = whisper.find((x) => x.id === modelSel.value); note.textContent = m ? m.note : ""; };
+  modelSel.addEventListener("change", updNote);
+  updNote();
+  const langSel = el("select", {}, LANGS.map(([v, l]) => el("option", { value: v, selected: v === (localStorage.getItem("cutkit.lang") || "id") }, l)));
+  const vad = el("input", { type: "checkbox", checked: true });
+  const script = el("textarea", { placeholder: "Opsional: tempel naskah voice over. Ejaan caption diambil dari naskah, waktunya dari suara." });
+  const go = el("button", { class: "btn primary" }, "Buat caption");
+  go.addEventListener("click", () => runAutoCaption({ trackId: srcSel.value, model: modelSel.value, language: langSel.value, vad: vad.checked, script: script.value }));
+  openModal(el("h2", {}, "🎙 Auto caption"),
+    el("p", { class: "hint" }, "Suara diubah jadi caption kata-per-kata dengan Whisper, sepenuhnya di komputermu. Model diunduh sekali di awal."),
+    field("Sumber suara", srcSel),
+    field("Model", modelSel), note,
+    field("Bahasa", langSel),
+    field("Jeda", el("label", { class: "check" }, vad, "Potong di jeda dengan deteksi suara (lebih rapi)")),
+    script,
+    el("p", { class: "hint" }, `Model disimpan di ${info.models_dir}`),
+    el("div", { class: "modal-actions" }, el("button", { class: "btn", onclick: closeModal }, "Batal"), go));
+}
+
+async function runAutoCaption(opts) {
+  localStorage.setItem("cutkit.whisper", opts.model);
+  localStorage.setItem("cutkit.lang", opts.language);
+  const bar = el("div");
+  const status = el("p", { class: "hint" }, "Menyiapkan…");
+  const cancel = el("button", { class: "btn", onclick: () => invoke("ai_cancel").catch(() => {}) }, "Batalkan");
+  openModal(el("h2", {}, "🎙 Membuat caption…"), el("div", { class: "progress" }, bar), status, el("div", { class: "modal-actions" }, cancel));
+  const setStatus2 = (text, frac) => { status.textContent = text; if (frac != null) bar.style.width = `${(frac * 100).toFixed(1)}%`; };
+  try {
+    await ensureModels([opts.model, ...(opts.vad ? ["vad-silero"] : [])], setStatus2);
+    const p = state.project;
+    const track = TL.getTrack(p, opts.trackId);
+    const clips = track.clips.filter((c) => (c.kind === "audio" || c.kind === "video") && TL.getAsset(p, c.asset_id)?.has_audio && !c.muted);
+    const total = clips.reduce((s, c) => s + c.duration * TL.speedOf(c), 0);
+    let done = 0;
+    let words = [];
+    for (const [i, c] of clips.entries()) {
+      const asset = TL.getAsset(p, c.asset_id);
+      const srcDur = c.duration * TL.speedOf(c);
+      const label = clips.length > 1 ? `Klip ${i + 1}/${clips.length}: ` : "";
+      setStatus2(`${label}mentranskripsi ${asset.name}…`, done / total);
+      const un = await tauri.event.listen("transcribe-progress", (ev) => {
+        setStatus2(`${label}mentranskripsi ${asset.name} · ${fmtTime(ev.payload.seconds).slice(0, 5)} / ${fmtTime(srcDur).slice(0, 5)}`, (done + Math.min(ev.payload.seconds, srcDur)) / total);
+      });
+      let got;
+      try { got = await invoke("transcribe", { path: asset.path, start: c.in, duration: srcDur, model: opts.model, language: opts.language, useVad: opts.vad }); } finally { un(); }
+      const sp = TL.speedOf(c);
+      for (const w of got) {
+        const s = c.start + w.start / sp;
+        const e = c.start + w.end / sp;
+        if (s < TL.clipEnd(c) - 0.01) words.push({ text: w.text, start: +s.toFixed(3), end: +Math.min(e, TL.clipEnd(c)).toFixed(3) });
+      }
+      done += srcDur;
+    }
+    if (!words.length) throw new Error("Tidak ada ucapan yang terdeteksi. Coba bahasa lain atau matikan deteksi suara.");
+    if (opts.script.trim()) words = CAP.alignScript(opts.script, words);
+    const from = Math.min(...clips.map((c) => c.start));
+    const to = Math.max(...clips.map((c) => TL.clipEnd(c)));
+    setCaptions((cap) => {
+      cap.words = cap.words.filter((w) => w.end <= from || w.start >= to).concat(words).sort((a, b) => a.start - b.start);
+      cap.enabled = true;
+    });
+    state.capPage = null;
+    closeModal();
+    switchTab("captions");
+    toast(`${words.length} kata caption dibuat. Periksa ejaannya di panel Caption.`);
+  } catch (e) {
+    openModal(el("h2", {}, String(errMsg(e)).includes("dibatalkan") ? "Dibatalkan" : "Auto caption gagal"),
+      el("pre", { style: "white-space:pre-wrap;font-size:12px;color:var(--danger);user-select:text" }, errMsg(e)),
+      el("div", { class: "modal-actions" }, el("button", { class: "btn primary", onclick: closeModal }, "Tutup")));
+  }
+}
+
 function setCaptions(fn, opts = {}) {
   commit((p) => fn(p.captions), Object.assign({ captions: true }, opts));
 }
@@ -889,6 +998,10 @@ function renderCaptionsPanel() {
   panel.replaceChildren(
     el("label", { class: "check" }, el("input", { type: "checkbox", checked: cap.enabled, onchange: (e) => setCaptions((c) => { c.enabled = e.target.checked; }) }), el("b", {}, "Tampilkan caption kata-per-kata")),
     el("div", { class: "insp" },
+      el("section", {},
+        el("h4", {}, "Otomatis dari suara"),
+        el("button", { class: "btn primary", onclick: autoCaptionDialog }, "🎙 Auto caption (Whisper)"),
+        el("p", { class: "hint" }, "Offline setelah model diunduh sekali. Bisa untuk Shorts maupun video panjang.")),
       el("section", {},
         el("h4", {}, "Impor"),
         el("div", { class: "btn-row" },
@@ -1464,6 +1577,20 @@ async function systemDialog(autoInstall = false) {
     item(t ? (t.has_qsv ? true : null) : null, t && t.has_qsv ? "Intel Quick Sync tersedia" : "Intel Quick Sync tidak terdeteksi", t && t.has_qsv ? "Pilih encoder Quick Sync saat ekspor agar lebih cepat dan hemat baterai." : "Ekspor memakai CPU (libx264); hasil tetap sama bagusnya."),
     item(info.winget ? true : null, info.winget ? "winget tersedia" : "winget tidak ditemukan", info.winget ? "Dipakai untuk memasang dan memperbarui ffmpeg." : "Pasang \"App Installer\" dari Microsoft Store bila ingin memasang ffmpeg otomatis."),
     el("div", { class: "check-row" }, el("span", { class: "mark" }, "🗂"), el("div", {}, el("b", {}, `Cache preview ${fmtBytes(info.cache_bytes)}`), el("div", { class: "hint" }, info.cache_dir)), clearBtn));
+  let ai = null;
+  try { ai = await invoke("ai_models"); } catch { /* */ }
+  if (ai) {
+    const installed = ai.models.filter((m) => m.installed);
+    const changeDir = el("button", { class: "btn small" }, "Ganti folder…");
+    changeDir.addEventListener("click", async () => {
+      const dir = await tauri.dialog.open({ directory: true, defaultPath: ai.models_dir });
+      if (!dir) return;
+      try { await invoke("set_models_dir", { path: dir }); toast("Folder model diganti. Model yang sudah ada di folder itu langsung dipakai."); systemDialog(); }
+      catch (e) { toast(errMsg(e), true); }
+    });
+    body.append(el("div", { class: "check-row" }, el("span", { class: "mark" }, "🧠"),
+      el("div", {}, el("b", {}, `Model AI: ${installed.length ? installed.map((m) => m.label).join(", ") : "belum ada"}`), el("div", { class: "hint" }, ai.models_dir)), changeDir));
+  }
   if (!t && info.winget) actions.prepend(install);
   install.addEventListener("click", async () => {
     install.disabled = true;
