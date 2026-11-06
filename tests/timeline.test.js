@@ -367,3 +367,11 @@ test("transisi dibatasi setengah durasi klip dan tidak bisa di klip audio", () =
   T.closeGaps(p, "v1");
   assert.equal(c2.start, 0.5, "tutup celah mempertahankan tumpukan");
 });
+
+test("warna: default netral, updateClip menggabungkan nilai", () => {
+  const p = T.normalize({ tracks: [{ id: "v1", clips: [{ id: "x", start: 0, duration: 1 }] }] });
+  assert.deepEqual(p.tracks[0].clips[0].color, { brightness: 1, contrast: 1, saturation: 1, hue: 0, temperature: 0, lut: "" });
+  T.updateClip(p, "x", { color: { saturation: 0 } });
+  assert.equal(p.tracks[0].clips[0].color.saturation, 0);
+  assert.equal(p.tracks[0].clips[0].color.contrast, 1);
+});

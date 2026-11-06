@@ -46,6 +46,25 @@ fn motion_matches_fixture() {
     }
 }
 
+/// Matriks warna Rust dicetak ke file supaya tes JS bisa membandingkan (tes JS membaca fixture yang sama).
+#[test]
+fn color_matrix_is_stable() {
+    for case in fixture()["color"].as_array().unwrap() {
+        let adj: cutkit_core::color::ColorAdjust = serde_json::from_value(case["adj"].clone()).unwrap();
+        let m = adj.matrix();
+        for row in m {
+            for v in row {
+                assert!(v.is_finite());
+            }
+        }
+    }
+    // Nilai acuan yang sama dicek di tests/parity.test.js (dihitung independen dengan Python).
+    let second: cutkit_core::color::ColorAdjust = serde_json::from_value(fixture()["color"][1]["adj"].clone()).unwrap();
+    assert!((second.matrix()[0][0] - 1.387515).abs() < 1e-5, "{}", second.matrix()[0][0]);
+    let gray = cutkit_core::color::ColorAdjust { saturation: 0.0, ..Default::default() }.matrix();
+    assert!((gray[0][0] - 0.213).abs() < 1e-12 && (gray[2][1] - 0.715).abs() < 1e-12);
+}
+
 #[test]
 fn placement_matches_fixture() {
     for case in fixture()["placement"].as_array().unwrap() {

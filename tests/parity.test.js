@@ -52,3 +52,31 @@ test("transisi preview memakai easing smoothstep yang sama dengan ekspor", () =>
   assert.equal(out.dx, -540);
   assert.ok(Math.abs(geometry.transitionAt(3.6, 3.5, { kind: "fade", duration: 0.4 }, null, 0, 1, 1).alpha - geometry.ease(0.25)) < 1e-9);
 });
+
+test("matriks warna JS sama dengan rumus Rust", () => {
+  const color = require("../ui/core/color.js");
+  const gray = color.matrix({ saturation: 0 });
+  assert.deepEqual(gray.map((r) => r.map((v) => +v.toFixed(6))), [[0.213, 0.715, 0.072], [0.213, 0.715, 0.072], [0.213, 0.715, 0.072]]);
+  for (const c of fixture.color) {
+    const m = color.matrix(c.adj);
+    // Abu-abu tetap netral (tanpa suhu): jumlah baris = kecerahan.
+    if (!c.adj.temperature) m.forEach((row) => assert.ok(Math.abs(row[0] + row[1] + row[2] - (c.adj.brightness || 1)) < 3e-3));
+  }
+  // Nilai acuan dihitung dengan rumus Rust (color.rs) untuk kasus kedua.
+  const m = color.matrix(fixture.color[1].adj);
+  assert.ok(Math.abs(m[0][0] - 1.387515) < 1e-5, String(m[0][0]));
+  assert.ok(color.isIdentity({}));
+  assert.ok(!color.isIdentity({ lut: "x.cube" }));
+});
+
+test("LUT .cube: identitas tidak mengubah warna, LUT negatif membalik", () => {
+  const color = require("../ui/core/color.js");
+  const id = color.parseCube("LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n");
+  const px = new Uint8ClampedArray([10, 128, 250, 255]);
+  color.applyLut(px, id);
+  assert.deepEqual([...px], [10, 128, 250, 255]);
+  const inv = color.parseCube("# negatif\nLUT_3D_SIZE 2\n1 1 1\n0 1 1\n1 0 1\n0 0 1\n1 1 0\n0 1 0\n1 0 0\n0 0 0\n");
+  color.applyLut(px, inv);
+  assert.deepEqual([...px], [245, 127, 5, 255]);
+  assert.throws(() => color.parseCube("LUT_3D_SIZE 3\n0 0 0\n"), /tidak valid/);
+});

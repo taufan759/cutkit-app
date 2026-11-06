@@ -6,7 +6,30 @@
  */
 (function () {
   "use strict";
-  const { timeline: TL, captions: CAP, geometry: GEO } = window.CK;
+  const { timeline: TL, captions: CAP, geometry: GEO, color: COLOR } = window.CK;
+
+  /** Filter SVG per klip untuk penyesuaian warna (dibuat ulang hanya bila nilainya berubah). */
+  const filterCache = new Map();
+  function colorFilter(clip) {
+    const c = clip.color;
+    if (!c || COLOR.isIdentity(Object.assign({}, c, { lut: "" }))) return "";
+    const id = `ckc-${clip.id}`;
+    const markup = COLOR.svgFilterMarkup(c);
+    if (filterCache.get(id) !== markup) {
+      const host = document.getElementById("ck-filters");
+      let node = document.getElementById(id);
+      if (!node) {
+        node = document.createElementNS("http://www.w3.org/2000/svg", "filter");
+        node.setAttribute("id", id);
+        node.setAttribute("color-interpolation-filters", "sRGB");
+        node.setAttribute("x", "0"); node.setAttribute("y", "0"); node.setAttribute("width", "1"); node.setAttribute("height", "1");
+        host.appendChild(node);
+      }
+      node.innerHTML = markup;
+      filterCache.set(id, markup);
+    }
+    return `url(#${id})`;
+  }
 
   const DRIFT = 0.25; // detik selisih sebelum elemen media di-seek ulang saat play
   const PRELOAD = 1.5; // detik sebelum klip mulai, elemennya sudah disiapkan
@@ -171,6 +194,53 @@
      * Versi klip yang latar hijaunya sudah dihapus, di canvas kecil seukuran tampilan.
      * Di-cache per klip selama frame sumber dan pengaturannya sama.
      */
+    /** LUT .cube yang sudah diurai, dimuat sekali per file. */
+    _lut(path) {
+      this.luts = this.luts || new Map();
+      if (!this.luts.has(path)) {
+        this.luts.set(path, null);
+        const invoke = window.__TAURI__ && window.__TAURI__.core.invoke;
+        if (invoke) invoke("read_text", { path }).then((t) => { this.luts.set(path, COLOR.parseCube(t)); this.invalidate(); }).catch((e) => console.warn("LUT", e));
+      }
+      return this.luts.get(path);
+    }
+
+    /**
+     * Sumber yang sudah diproses: chroma key -> filter warna -> LUT (urutan sama dengan ekspor).
+     * Mengembalikan { source, colored } — colored = filter warna sudah diterapkan.
+     */
+    _processed(clip, source, pl, k) {
+      const lut = clip.color && clip.color.lut ? this._lut(clip.color.lut) : null;
+      const keyed = clip.chroma && clip.chroma.enabled;
+      if (!keyed && !lut) return { source, colored: false };
+      let src = keyed ? this._keyed(clip, source, pl, k) : source;
+      if (!lut) return { source: src, colored: false };
+      const sw = src.videoWidth || src.naturalWidth || src.width;
+      const sh = src.videoHeight || src.naturalHeight || src.height;
+      const w = Math.max(2, Math.min(sw, Math.round(pl.w * k * 1.5)));
+      const h = Math.max(2, Math.round((w * sh) / sw));
+      this.lutCache = this.lutCache || new Map();
+      let e = this.lutCache.get(clip.id);
+      const key = `${source.currentTime || 0}|${JSON.stringify(clip.color)}|${JSON.stringify(clip.chroma)}|${w}`;
+      if (e && e.key === key) return { source: e.canvas, colored: true };
+      if (!e) {
+        const canvas = document.createElement("canvas");
+        e = { canvas, ctx: canvas.getContext("2d", { willReadFrequently: true }) };
+        this.lutCache.set(clip.id, e);
+      }
+      e.canvas.width = w;
+      e.canvas.height = h;
+      e.ctx.clearRect(0, 0, w, h);
+      e.ctx.filter = colorFilter(clip) || "none";
+      e.ctx.drawImage(src, 0, 0, w, h);
+      e.ctx.filter = "none";
+      const img = e.ctx.getImageData(0, 0, w, h);
+      COLOR.applyLut(img.data, lut);
+      e.ctx.putImageData(img, 0, 0);
+      e.key = key;
+      return { source: e.canvas, colored: true };
+    }
+
     _keyed(clip, source, pl, k) {
       const sw = source.videoWidth || source.naturalWidth;
       const sh = source.videoHeight || source.naturalHeight;
@@ -398,7 +468,7 @@
             const r = Math.max(4, Math.round(Math.min(p.canvas.width, p.canvas.height) / 27));
             ctx.save();
             ctx.globalAlpha = tr.alpha;
-            ctx.filter = `blur(${(r * 0.8 * k).toFixed(1)}px)`;
+            ctx.filter = `${colorFilter(clip)} blur(${(r * 0.8 * k).toFixed(1)}px)`.trim();
             // Digambar lebih besar 3r di tiap sisi: blur canvas mengambil piksel transparan di luar tepi,
             // sedangkan boxblur ffmpeg menjepit tepi; tanpa ini pinggiran preview menggelap.
             const pad = r * 3;
@@ -409,8 +479,10 @@
             ctx.drawImage(source, (p.canvas.width - sw * s2) / 2, (p.canvas.height - sh * s2) / 2, sw * s2, sh * s2);
             ctx.restore();
           }
-          if (source && clip.chroma && clip.chroma.enabled) source = this._keyed(clip, source, pl, k);
+          let colored = false;
+          if (source) ({ source, colored } = this._processed(clip, source, pl, k));
           ctx.save();
+          if (!colored) { const cf = colorFilter(clip); if (cf) ctx.filter = cf; }
           ctx.globalAlpha = Math.max(0, Math.min(1, clip.transform.opacity)) * tr.alpha;
           ctx.translate(pl.cx + tr.dx, pl.cy + tr.dy);
           ctx.rotate(pl.rad);

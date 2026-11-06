@@ -61,6 +61,8 @@ pub struct ExportPlan {
     pub filter_script: String,
     pub ass: Option<String>,
     pub duration: f64,
+    /// File yang disalin ke folder kerja: (nama di folder kerja, path sumber), mis. LUT .cube.
+    pub copies: Vec<(String, String)>,
 }
 
 /// Satu proses ffmpeg dalam ekspor.
@@ -70,6 +72,8 @@ pub struct ExportStep {
     pub args: Vec<String>,
     /// File (nama, isi) yang ditulis ke folder kerja sebelum langkah dijalankan.
     pub files: Vec<(String, String)>,
+    /// File (nama di folder kerja, path sumber) yang disalin sebelum langkah dijalankan.
+    pub copies: Vec<(String, String)>,
     /// Panjang keluaran langkah ini (detik), untuk menghitung progres.
     pub duration: f64,
     /// Porsi progres total; jumlah semua langkah = 1.
@@ -101,6 +105,8 @@ struct Visual {
     t_in: Option<(String, f64, f64)>,
     /// Didorong keluar oleh klip berikutnya (push): (jenis, durasi, waktu mulai).
     t_out: Option<(String, f64, f64)>,
+    /// Filter warna (diawali koma) dan LUT yang perlu disalin.
+    color: String,
 }
 
 /// Ekspresi easing halus (smoothstep) dari kemajuan transisi di waktu `t`.
@@ -191,8 +197,8 @@ fn is_visual(track_kind: TrackKind, hidden: bool, clip_kind: ClipKind, asset_kin
     track_kind == TrackKind::Video && !hidden && asset_kind != AssetKind::Audio && clip_kind != ClipKind::Audio && clip_kind != ClipKind::Text
 }
 
-/// Menyusun input dan filter graph satu pass. Mengembalikan (argumen input + map, filter graph).
-fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String), String> {
+/// Menyusun input dan filter graph satu pass. Mengembalikan (argumen input + map, filter graph, file LUT yang disalin).
+fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String, Vec<(String, String)>), String> {
     let (w, h, fps) = (project.canvas.width, project.canvas.height, project.canvas.fps);
     let duration = pass.duration;
     let bg = project.canvas.background.trim_start_matches('#');
@@ -207,6 +213,7 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String), S
     let mut visuals: Vec<Visual> = vec![];
     let mut audios: Vec<AudioSrc> = vec![];
     let mut next_input = 2usize;
+    let mut copies: Vec<(String, String)> = vec![];
 
     for track in &project.tracks {
         let mut clips: Vec<_> = track.clips.iter().filter(|c| c.duration > 0.0).collect();
@@ -264,7 +271,18 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String), S
                 // Awal transisi di waktu pass ini (bisa negatif bila klip terpotong di batas bagian).
                 let t_in = incoming.map(|t| (t.kind.clone(), t.duration, clip.start - clip.offset));
                 let t_out = next.filter(|n| n.transition.kind.starts_with("push")).map(|n| (n.transition.kind.clone(), n.transition.duration, n.start - n.offset));
-                visuals.push(Visual { input, blur_bg: clip.background == "blur", colorkey, speed, motion, start: clip.start, end: clip.end(), place: pl, opacity: clip.transform.opacity.clamp(0.0, 1.0), t_in, t_out });
+                // LUT disalin ke folder kerja dengan nama sederhana agar tidak perlu escape path di filter.
+                let lut_name = (!clip.color.lut.trim().is_empty()).then(|| {
+                    if let Some((name, _)) = copies.iter().find(|(_, src)| src == &clip.color.lut) {
+                        name.clone()
+                    } else {
+                        let name = format!("cutkit-lut-{}.cube", copies.len());
+                        copies.push((name.clone(), clip.color.lut.clone()));
+                        name
+                    }
+                });
+                let color = clip.color.filters(lut_name.as_deref());
+                visuals.push(Visual { input, blur_bg: clip.background == "blur", colorkey, speed, motion, start: clip.start, end: clip.end(), place: pl, opacity: clip.transform.opacity.clamp(0.0, 1.0), t_in, t_out, color });
             }
             if want_audio {
                 // Selama transisi suara ikut crossfade: klip baru masuk pelan, klip lama keluar pelan.
@@ -300,7 +318,8 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String), S
             if v.blur_bg {
                 g.push(format!("[{}:v]split=2[s{i}][q{i}]", v.input));
                 g.push(format!(
-                    "[q{i}]format=rgba,scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},boxblur={blur_radius}:2,{pts}[l{i}]"
+                    "[q{i}]format=rgba,scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}{},boxblur={blur_radius}:2,{pts}[l{i}]",
+                    v.color
                 ));
                 let fade_bg = match &v.t_in {
                     Some((k, d, s)) if k == "fade" => format!(",fade=t=in:st={}:d={}:alpha=1", f(*s), f(*d)),
@@ -334,6 +353,8 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String), S
                 }
                 None => format!("{src}format=rgba{key},scale={}:{}", p.w, p.h),
             };
+            // Warna setelah skala (lebih ringan untuk sumber besar), sebelum rotasi.
+            chain.push_str(&v.color);
             if p.radians.abs() > 1e-9 {
                 chain.push_str(&format!(",rotate={}:ow={}:oh={}:c=0x00000000", f(p.radians), p.ow, p.oh));
             }
@@ -412,7 +433,7 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String), S
     if pass.audio {
         args.extend(strings(&["-map", "[aout]"]));
     }
-    Ok((args, filter_script))
+    Ok((args, filter_script, copies))
 }
 
 /// Argumen encoder video (sama untuk semua bagian supaya bisa digabung tanpa encode ulang).
@@ -464,10 +485,10 @@ pub fn build_plan(project: &Project, opts: &ExportOptions) -> Result<ExportPlan,
         ass_file: ASS_FILE.into(),
         duration,
     };
-    let (mut args, filter_script) = build_pass(project, &pass)?;
+    let (mut args, filter_script, copies) = build_pass(project, &pass)?;
     args.extend(video_codec_args(opts, project.canvas.fps));
     args.extend(strings(&["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", "-t", &f(duration), &opts.output]));
-    Ok(ExportPlan { args, filter_script, ass: ass_text, duration })
+    Ok(ExportPlan { args, filter_script, ass: ass_text, duration, copies })
 }
 
 /// Klip visual yang membutuhkan input ffmpeg sendiri: (mulai, selesai).
@@ -565,7 +586,7 @@ pub fn build_job(project: &Project, opts: &ExportOptions) -> Result<ExportJob, S
         if let Some(a) = &plan.ass {
             files.push((ASS_FILE.to_string(), a.clone()));
         }
-        let step = ExportStep { label: "Ekspor".into(), args: plan.args, files, duration, weight: 1.0 };
+        let step = ExportStep { label: "Ekspor".into(), args: plan.args, files, copies: plan.copies, duration, weight: 1.0 };
         return Ok(ExportJob { steps: vec![step], duration, output: opts.output.clone(), chunked: false });
     }
 
@@ -578,9 +599,9 @@ pub fn build_job(project: &Project, opts: &ExportOptions) -> Result<ExportJob, S
 
     // 1. Seluruh audio sekali jalan ke WAV (decoder audio ringan, jadi semua klip boleh dibuka).
     let audio_pass = Pass { video: false, audio: true, loudnorm: false, ass: None, filter_file: "cutkit-audio-filter.txt".into(), ass_file: String::new(), duration };
-    let (mut args, filter) = build_pass(project, &audio_pass)?;
+    let (mut args, filter, _) = build_pass(project, &audio_pass)?;
     args.extend(strings(&["-c:a", "pcm_s16le", "-ar", "48000", "-t", &f(duration), "-f", "wav", "cutkit-audio.wav"]));
-    steps.push(ExportStep { label: "Audio".into(), args, files: vec![(audio_pass.filter_file.clone(), filter)], duration, weight: w_audio });
+    steps.push(ExportStep { label: "Audio".into(), args, files: vec![(audio_pass.filter_file.clone(), filter)], copies: vec![], duration, weight: w_audio });
 
     // 2. Video per bagian.
     let mut list = String::new();
@@ -598,7 +619,7 @@ pub fn build_job(project: &Project, opts: &ExportOptions) -> Result<ExportJob, S
             ass_file: format!("cutkit-captions-{i}.ass"),
             duration: len,
         };
-        let (mut args, filter) = build_pass(&wp, &pass)?;
+        let (mut args, filter, copies) = build_pass(&wp, &pass)?;
         args.extend(video_codec_args(opts, fps));
         let out = format!("cutkit-part-{i}.mkv");
         args.extend(strings(&["-an", "-t", &f(len), "-f", "matroska", &out]));
@@ -606,7 +627,7 @@ pub fn build_job(project: &Project, opts: &ExportOptions) -> Result<ExportJob, S
         if let Some(a) = ass_text {
             files.push((pass.ass_file.clone(), a));
         }
-        steps.push(ExportStep { label: format!("Video bagian {}/{}", i + 1, parts), args, files, duration: len, weight: w_video * len / duration });
+        steps.push(ExportStep { label: format!("Video bagian {}/{}", i + 1, parts), args, files, copies, duration: len, weight: w_video * len / duration });
         list.push_str(&format!("file '{out}'\n"));
     }
 
@@ -617,7 +638,7 @@ pub fn build_job(project: &Project, opts: &ExportOptions) -> Result<ExportJob, S
         args.extend(strings(&["-af", LOUDNORM]));
     }
     args.extend(strings(&["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", "-t", &f(duration), &opts.output]));
-    steps.push(ExportStep { label: "Menggabungkan".into(), args, files: vec![("cutkit-parts.txt".into(), list)], duration, weight: w_concat });
+    steps.push(ExportStep { label: "Menggabungkan".into(), args, files: vec![("cutkit-parts.txt".into(), list)], copies: vec![], duration, weight: w_concat });
 
     Ok(ExportJob { steps, duration, output: opts.output.clone(), chunked: true })
 }
@@ -834,7 +855,7 @@ mod tests {
         assert!(w.tracks[2].clips.is_empty(), "audio dirender terpisah");
         assert!(!w.captions.enabled);
         // Gerak logo melanjutkan dari frame ke-90 dari 6000, bukan mulai dari awal.
-        let (_, filter) = build_pass(&w, &Pass { video: true, audio: false, loudnorm: false, ass: None, filter_file: "x".into(), ass_file: "y".into(), duration: 7.0 }).unwrap();
+        let (_, filter, _) = build_pass(&w, &Pass { video: true, audio: false, loudnorm: false, ass: None, filter_file: "x".into(), ass_file: "y".into(), duration: 7.0 }).unwrap();
         assert!(filter.contains("zoompan=z='1+0.2*min((on+90)/5999,1)'"), "{filter}");
     }
 
@@ -883,6 +904,17 @@ mod tests {
         // Klip pertama di track tidak punya pendahulu: transisinya diabaikan.
         p.tracks[0].clips[0].transition = Transition { kind: "fade".into(), duration: 1.0 };
         assert!(!build_plan(&p, &opts()).unwrap().filter_script.contains("fade=t=in:st=0:d=1:alpha=1"));
+    }
+
+    #[test]
+    fn color_filters_and_lut_copies() {
+        let mut p = project();
+        p.tracks[0].clips[0].color = crate::color::ColorAdjust { saturation: 0.0, lut: "D:/LUT/film.cube".into(), ..Default::default() };
+        p.tracks[1].clips[0].color = crate::color::ColorAdjust { lut: "D:/LUT/film.cube".into(), ..Default::default() };
+        let plan = build_plan(&p, &opts()).unwrap();
+        assert!(plan.filter_script.contains("scale=3413:1920,colorchannelmixer=rr=0.213:rg=0.715:rb=0.072:gr=0.213:gg=0.715:gb=0.072:br=0.213:bg=0.715:bb=0.072,lut3d=file=cutkit-lut-0.cube,setpts"), "{}", plan.filter_script);
+        assert!(plan.filter_script.contains("scale=432:346,lut3d=file=cutkit-lut-0.cube,rotate="), "LUT yang sama disalin sekali");
+        assert_eq!(plan.copies, vec![("cutkit-lut-0.cube".to_string(), "D:/LUT/film.cube".to_string())]);
     }
 
     #[test]

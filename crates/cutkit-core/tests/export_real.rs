@@ -319,3 +319,32 @@ fn transitions_render_between_clips() {
     let info = probe(&tools.ffprobe, &o).unwrap();
     assert!((info.duration - 6.0).abs() < 0.15, "durasi {}", info.duration);
 }
+
+#[test]
+fn color_adjust_and_lut_render() {
+    let Some(tools) = find_tools(None) else {
+        eprintln!("ffmpeg tidak ditemukan, tes warna dilewati");
+        return;
+    };
+    let dir = tmp_dir("warna");
+    let s = |p: &PathBuf| p.to_string_lossy().to_string();
+    let red = dir.join("merah.png");
+    run(&tools.ffmpeg, &["-hide_banner", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=0xff0000:s=64x64:d=1", "-frames:v", "1", "-update", "1", &s(&red)].map(String::from)).unwrap();
+    // LUT 2x2x2 pembalik warna (merah -> cyan).
+    let lut = dir.join("negatif lut.cube");
+    std::fs::write(&lut, "LUT_3D_SIZE 2\n1 1 1\n0 1 1\n1 0 1\n0 0 1\n1 1 0\n0 1 0\n1 0 0\n0 0 0\n").unwrap();
+    let mut p = Project::new("warna");
+    p.canvas = Canvas { width: 128, height: 64, fps: 30.0, background: "#000000".into() };
+    p.assets.push(Asset { id: "r".into(), path: s(&red), kind: AssetKind::Image, width: 64, height: 64, has_video: true, ..Default::default() });
+    // Kiri: hitam putih. Kanan: LUT negatif.
+    p.tracks[0].clips.push(Clip { id: "a".into(), kind: ClipKind::Image, asset_id: Some("r".into()), start: 0.0, duration: 1.0, transform: Transform { x: -32.0, ..Default::default() }, color: cutkit_core::color::ColorAdjust { saturation: 0.0, ..Default::default() }, ..Default::default() });
+    p.tracks[1].clips.push(Clip { id: "b".into(), kind: ClipKind::Image, asset_id: Some("r".into()), start: 0.0, duration: 1.0, transform: Transform { x: 32.0, ..Default::default() }, color: cutkit_core::color::ColorAdjust { lut: s(&lut), ..Default::default() }, ..Default::default() });
+    let out = dir.join("warna.mp4");
+    let plan = build_plan(&p, &ExportOptions { output: s(&out), quality: Quality::Fast, ..Default::default() }).unwrap();
+    run_export(&tools.ffmpeg, &dir.join("kerja"), &plan, Arc::new(AtomicBool::new(false)), |_| {}).expect("ekspor warna");
+    let gray = pixel(&tools.ffmpeg, &s(&out), 0.5, 32, 32);
+    let cyan = pixel(&tools.ffmpeg, &s(&out), 0.5, 96, 32);
+    // 0.213 x 255 = 54: merah tanpa saturasi jadi abu-abu gelap.
+    assert!((gray[0] as i32 - gray[1] as i32).abs() < 12 && (gray[0] as i32 - 54).abs() < 16, "abu-abu: {gray:?}");
+    assert!(cyan[0] < 50 && cyan[1] > 200 && cyan[2] > 200, "cyan: {cyan:?}");
+}

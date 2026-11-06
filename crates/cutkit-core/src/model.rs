@@ -124,6 +124,8 @@ pub struct Clip {
     /// Transisi masuk dari klip sebelumnya di track yang sama; klip ini menumpuk klip
     /// sebelumnya selama `duration` detik.
     pub transition: Transition,
+    /// Penyesuaian warna dan LUT.
+    pub color: crate::color::ColorAdjust,
     pub text: Option<TextClip>,
     /// Hanya saat ekspor bertahap: detik sejak awal klip asli (klip terpotong di batas bagian).
     #[serde(skip)]
@@ -153,6 +155,7 @@ impl Default for Clip {
             background: "none".into(),
             chroma: Chroma::default(),
             transition: Transition::default(),
+            color: crate::color::ColorAdjust::default(),
             text: None,
             offset: 0.0,
             span: 0.0,

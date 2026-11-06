@@ -208,7 +208,7 @@ pub fn run_export(ffmpeg: &str, work_dir: &Path, plan: &ExportPlan, cancel: Arc<
     }
     let output = plan.args.last().cloned().unwrap_or_default();
     let job = ExportJob {
-        steps: vec![ExportStep { label: "Ekspor".into(), args: plan.args.clone(), files, duration: plan.duration, weight: 1.0 }],
+        steps: vec![ExportStep { label: "Ekspor".into(), args: plan.args.clone(), files, copies: plan.copies.clone(), duration: plan.duration, weight: 1.0 }],
         duration: plan.duration,
         output,
         chunked: false,
@@ -254,6 +254,9 @@ pub fn run_job(ffmpeg: &str, work_dir: &Path, job: &ExportJob, cancel: Arc<Atomi
 fn run_step(ffmpeg: &str, work_dir: &Path, step: &ExportStep, cancel: Arc<AtomicBool>, mut on_progress: impl FnMut(f64, &str)) -> Result<(), String> {
     for (name, content) in &step.files {
         std::fs::write(work_dir.join(name), content).map_err(|e| e.to_string())?;
+    }
+    for (name, src) in &step.copies {
+        std::fs::copy(src, work_dir.join(name)).map_err(|e| format!("Tidak bisa menyalin {src}: {e}"))?;
     }
     run_ffmpeg_progress(ffmpeg, work_dir, &step.args, cancel, |sec, sp| on_progress(sec, sp))
 }

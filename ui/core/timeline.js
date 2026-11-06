@@ -124,6 +124,7 @@
     c.background = c.background === "blur" ? "blur" : "none";
     c.chroma = Object.assign({ enabled: false, color: "#00ff00", similarity: 0.3, blend: 0.1 }, c.chroma || {});
     c.transition = Object.assign({ kind: "none", duration: 0.5 }, c.transition || {});
+    c.color = Object.assign({ brightness: 1, contrast: 1, saturation: 1, hue: 0, temperature: 0, lut: "" }, c.color || {});
     if (c.kind === "text") {
       c.text = c.text || { text: "", style: defaultTextStyle() };
       c.text.style = Object.assign(defaultTextStyle(), c.text.style || {});
@@ -478,6 +479,7 @@
       if (k === "transform") Object.assign(clip.transform, v);
       else if (k === "motion") Object.assign(clip.motion, v);
       else if (k === "chroma") Object.assign(clip.chroma, v);
+      else if (k === "color") Object.assign(clip.color, v);
       else if (k === "text") {
         clip.text = clip.text || { text: "", style: defaultTextStyle() };
         if (v.text != null) clip.text.text = v.text;

@@ -1300,6 +1300,29 @@ function renderInspector() {
   }
 
   if (c.kind === "video" || c.kind === "image") {
+    const col = c.color;
+    const pctSlider = (label, key, min, max) => slider(label, col[key], { min, max, unit: "%", fromModel: (v) => v * 100, toModel: (v) => v / 100, apply: (v) => upd({ color: { [key]: v } }) });
+    const pickLut = async () => {
+      const path = await tauri.dialog.open({ filters: [{ name: "LUT 3D", extensions: ["cube"] }] });
+      if (!path) return;
+      try { CK.color.parseCube(await invoke("read_text", { path })); commit((pp) => TL.updateClip(pp, c.id, { color: { lut: path } })); }
+      catch (e) { toast(errMsg(e), true); }
+    };
+    sections.push(el("section", {},
+      el("h4", {}, "Warna & filter"),
+      el("div", { class: "btn-row" }, CK.color.PRESETS.map((pr) => el("button", {
+        class: "btn small",
+        onclick: () => commit((pp) => TL.updateClip(pp, c.id, { color: Object.assign({}, CK.color.DEFAULT, { lut: col.lut }, pr.values) })),
+      }, pr.name))),
+      pctSlider("Kecerahan", "brightness", 0, 200),
+      pctSlider("Kontras", "contrast", 0, 200),
+      pctSlider("Saturasi", "saturation", 0, 200),
+      slider("Rona", col.hue, { min: -180, max: 180, unit: "°", apply: (v) => upd({ color: { hue: v } }) }),
+      slider("Suhu", col.temperature, { min: -100, max: 100, fromModel: (v) => v * 100, toModel: (v) => v / 100, apply: (v) => upd({ color: { temperature: v } }) }),
+      field("LUT", el("div", { class: "ctl" },
+        el("span", { class: "hint", style: "flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", title: col.lut }, col.lut ? baseName(col.lut) : "tanpa LUT"),
+        el("button", { class: "btn small", onclick: pickLut }, "Pilih .cube…"),
+        col.lut ? el("button", { class: "btn small ghost", onclick: () => commit((pp) => TL.updateClip(pp, c.id, { color: { lut: "" } })) }, "✕") : null))));
     const prev = TL.previousClip(f.track, c);
     const canTrans = prev && Math.abs(TL.clipEnd(prev) - (TL.transitionActive(c) ? c.transition.duration : 0) - c.start) < 0.02;
     const TRANS_LABELS = [["none", "Tanpa"], ["fade", "Crossfade"], ["slide-left", "Geser ←"], ["slide-right", "Geser →"], ["slide-up", "Geser ↑"], ["slide-down", "Geser ↓"], ["push-left", "Dorong ←"], ["push-right", "Dorong →"]];

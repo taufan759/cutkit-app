@@ -421,5 +421,26 @@
         0.5
       ]
     }
+  ],
+  "color": [
+    {
+      "adj": {
+        "saturation": 0
+      }
+    },
+    {
+      "adj": {
+        "brightness": 1.2,
+        "saturation": 1.5,
+        "hue": 30,
+        "temperature": 0.5
+      }
+    },
+    {
+      "adj": {
+        "hue": -90,
+        "temperature": -1
+      }
+    }
   ]
 }
