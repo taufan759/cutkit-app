@@ -4,7 +4,7 @@
 
 use cutkit_core::ai;
 use cutkit_core::ffmpeg::{self, find_tools};
-use cutkit_core::{build_job, Encoder, ExportOptions, Project, Quality};
+use cutkit_core::{build_frame, build_job, Encoder, ExportOptions, Project, Quality};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -15,6 +15,7 @@ const HELP: &str = "cutkit-cli <perintah> [argumen]
   info                                   status ffmpeg dan model AI
   probe <file>...                        info media
   export <proyek.json> <hasil.mp4> [--quality fast|balanced|best] [--qsv] [--loudnorm]
+  frame <proyek.json> <detik> <hasil.png> [--height 720]   satu frame hasil ekspor
   transcribe <file> [--start s] [--duration d] [--model whisper-small] [--lang id] [--vad]
   tts <hasil.wav> (--text \"...\" | --text-file f) [--speed 1] [--gap 0.3]
   beats <file>                           tempo dan ketukan musik
@@ -139,6 +140,18 @@ fn run(args: Args) -> Result<Value, String> {
             let _ = std::fs::remove_dir_all(&work);
             r?;
             Ok(json!({ "output": out, "duration": job.duration, "parts": job.steps.len(), "seconds": start.elapsed().as_secs_f64() }))
+        }
+        "frame" => {
+            let (proj, t, out) = (args.pos.get(1).ok_or("Butuh file proyek")?, args.pos.get(2).ok_or("Butuh detik")?, args.pos.get(3).ok_or("Butuh file hasil .png")?);
+            let t: f64 = t.parse().map_err(|_| format!("Detik tidak valid: {t}"))?;
+            let tools = tools()?;
+            let project = Project::from_json(&std::fs::read_to_string(proj).map_err(|e| e.to_string())?)?;
+            let job = build_frame(&project, t, out, args.num("height", 720.0) as u32)?;
+            let work = std::env::temp_dir().join("cutkit-cli-frame").join(format!("{}", std::process::id()));
+            let r = ffmpeg::run_job(&tools.ffmpeg, &work, &job, Arc::new(AtomicBool::new(false)), |_| {});
+            let _ = std::fs::remove_dir_all(&work);
+            r?;
+            Ok(json!({ "output": out, "time": t, "duration": project.duration() }))
         }
         "transcribe" => {
             let file = args.pos.get(1).ok_or("Butuh file audio/video")?;

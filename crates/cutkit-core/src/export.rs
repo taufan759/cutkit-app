@@ -718,6 +718,34 @@ fn header() -> Vec<String> {
     strings(&["-hide_banner", "-y", "-nostats", "-loglevel", "error", "-progress", "pipe:1", "-stats_period", "0.25"])
 }
 
+/// Satu frame proyek di waktu `t` sebagai PNG (tinggi maksimal `max_height`), memakai
+/// penyusun yang sama dengan ekspor sehingga gambarnya sama dengan hasil MP4.
+/// Hanya klip di sekitar `t` yang didekode, jadi cepat juga untuk video panjang.
+pub fn build_frame(project: &Project, t: f64, output: &str, max_height: u32) -> Result<ExportJob, String> {
+    let duration = check(project, &ExportOptions { output: output.to_string(), ..Default::default() })?;
+    let fps = project.canvas.fps.max(1.0);
+    let t0 = (t.max(0.0) * fps).floor() / fps;
+    let t0 = t0.min((duration - 1.0 / fps).max(0.0));
+    let t1 = t0 + 2.0 / fps;
+    let wp = window_project(project, t0, t1);
+    let ass_text = ass::build_ass_window(project, t0, t1);
+    let pass = Pass { video: true, audio: false, loudnorm: false, ass: ass_text.clone(), filter_file: FILTER_FILE.into(), ass_file: ASS_FILE.into(), duration: t1 - t0 };
+    let (mut args, filter, copies) = build_pass(&wp, &pass)?;
+    args.extend(strings(&["-an", "-frames:v", "1", "-update", "1", "-f", "image2", "cutkit-frame.png"]));
+    let mut files = vec![(FILTER_FILE.to_string(), filter)];
+    if let Some(a) = ass_text {
+        files.push((ASS_FILE.to_string(), a));
+    }
+    let h = max_height.clamp(64, 4320);
+    let mut scale = header();
+    scale.extend(strings(&["-i", "cutkit-frame.png", "-vf", &format!("scale=-2:'min(ih,{h})':flags=lanczos"), "-frames:v", "1", "-update", "1", output]));
+    let steps = vec![
+        ExportStep { label: "Frame".into(), args, files, copies, duration: t1 - t0, weight: 0.8 },
+        ExportStep { label: "Perkecil".into(), args: scale, files: vec![], copies: vec![], duration: 0.0, weight: 0.2 },
+    ];
+    Ok(ExportJob { steps, duration: t1 - t0, output: output.to_string(), chunked: false })
+}
+
 /// Rencana ekspor lengkap: sekali jalan untuk proyek pendek, bertahap untuk video panjang.
 pub fn build_job(project: &Project, opts: &ExportOptions) -> Result<ExportJob, String> {
     let duration = check(project, opts)?;
@@ -811,6 +839,17 @@ mod tests {
 
     fn opts() -> ExportOptions {
         ExportOptions { output: "D:/out/hasil.mp4".into(), ..Default::default() }
+    }
+
+    #[test]
+    fn frame_decodes_only_clips_around_t() {
+        let job = build_frame(&project(), 3.2, "D:/out/f.png", 720).unwrap();
+        let a = job.steps[0].args.join(" ");
+        assert!(a.contains("-ss 5.7"), "video maju ke detik 3.2 sumber: {a}");
+        assert!(!a.contains("x.png"), "meme sudah lewat di detik 3.2");
+        assert!(a.ends_with("-an -frames:v 1 -update 1 -f image2 cutkit-frame.png"));
+        assert!(job.steps[1].args.join(" ").contains("min(ih,720)"));
+        assert!(build_frame(&Project::new("x"), 0.0, "f.png", 720).is_err());
     }
 
     #[test]
