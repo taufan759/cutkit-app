@@ -79,7 +79,7 @@ fn export_synthetic_project() {
         .collect();
 
     let out = dir.join("hasil").join("tes.mp4");
-    let plan = build_plan(&p, &ExportOptions { output: s(&out), encoder: Encoder::X264, quality: Quality::Fast }).unwrap();
+    let plan = build_plan(&p, &ExportOptions { output: s(&out), encoder: Encoder::X264, quality: Quality::Fast, ..Default::default() }).unwrap();
     assert!(plan.ass.is_some());
     let mut reports = vec![];
     run_export(&tools.ffmpeg, &dir.join("kerja"), &plan, Arc::new(AtomicBool::new(false)), |p| reports.push(p)).expect("ekspor jalan");
@@ -120,4 +120,92 @@ fn demo_media_is_generated() {
     let img = probe(&tools.ffprobe, &media.visuals[0]).unwrap();
     assert_eq!((img.width, img.height), (1080, 1920));
     assert!((probe(&tools.ffprobe, &media.music).unwrap().duration - 20.0).abs() < 0.1);
+}
+
+/// Warna satu piksel (RGB) pada waktu `t` di file video.
+fn pixel(ffmpeg: &str, file: &str, t: f64, x: u32, y: u32) -> [u8; 3] {
+    let out = std::process::Command::new(ffmpeg)
+        .args(["-hide_banner", "-loglevel", "error", "-ss", &format!("{t}"), "-i", file, "-frames:v", "1", "-vf", &format!("crop=1:1:{x}:{y},format=rgb24"), "-f", "rawvideo", "-"])
+        .output()
+        .unwrap();
+    assert!(out.status.success() && out.stdout.len() >= 3, "{}", String::from_utf8_lossy(&out.stderr));
+    [out.stdout[0], out.stdout[1], out.stdout[2]]
+}
+
+/// Loudness terintegrasi (LUFS) menurut filter ebur128.
+fn integrated_lufs(ffmpeg: &str, file: &str) -> f64 {
+    let out = std::process::Command::new(ffmpeg).args(["-hide_banner", "-nostats", "-i", file, "-af", "ebur128", "-f", "null", "-"]).output().unwrap();
+    let text = String::from_utf8_lossy(&out.stderr);
+    let summary = &text[text.rfind("Summary:").expect("ringkasan ebur128")..];
+    let line = summary.lines().find(|l| l.trim_start().starts_with("I:")).unwrap();
+    line.split_whitespace().nth(1).unwrap().parse().unwrap()
+}
+
+#[test]
+fn export_with_effects() {
+    let Some(tools) = find_tools(None) else {
+        eprintln!("ffmpeg tidak ditemukan, tes efek dilewati");
+        return;
+    };
+    let dir = tmp_dir("effects");
+    let s = |p: &PathBuf| p.to_string_lossy().to_string();
+    let ff = |args: &[&str]| run(&tools.ffmpeg, &args.iter().map(|a| a.to_string()).collect::<Vec<_>>()).unwrap();
+    let land = dir.join("lanskap.mp4");
+    ff(&["-hide_banner", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=640x360:r=30:d=4", "-f", "lavfi", "-i", "sine=f=440:d=4", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", &s(&land)]);
+    let green = dir.join("greenscreen.mp4");
+    ff(&["-hide_banner", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=0x00ff00:s=320x240:r=30:d=3,drawbox=x=110:y=70:w=100:h=100:color=blue:t=fill", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", &s(&green)]);
+    let grad = dir.join("gradasi.png");
+    ff(&["-hide_banner", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "nullsrc=s=400x400:d=1,geq=lum='X*255/W':cb=128:cr=128", "-frames:v", "1", "-update", "1", &s(&grad)]);
+
+    let mut p = Project::new("efek");
+    p.canvas = Canvas { width: 540, height: 960, fps: 30.0, background: "#000000".into() };
+    for (id, path, kind) in [("l", &land, AssetKind::Video), ("g", &green, AssetKind::Video), ("i", &grad, AssetKind::Image)] {
+        let info = probe(&tools.ffprobe, &s(path)).unwrap();
+        p.assets.push(Asset { id: id.into(), path: s(path), kind, duration: info.duration, width: info.width, height: info.height, has_audio: info.has_audio, has_video: true, ..Default::default() });
+    }
+    // Lanskap 4 detik diputar 2x (2 detik), latar blur.
+    p.tracks[0].clips.push(Clip { id: "a".into(), asset_id: Some("l".into()), start: 0.0, duration: 2.0, speed: 2.0, background: "blur".into(), ..Default::default() });
+    // Gradasi horizontal dengan zoom masuk kuat, memenuhi kanvas.
+    p.tracks[0].clips.push(Clip { id: "b".into(), kind: ClipKind::Image, asset_id: Some("i".into()), start: 2.0, duration: 2.0, fit: Fit::Cover, motion: Motion { kind: "zoom-in".into(), amount: 1.0 }, ..Default::default() });
+    // Green screen di atas, latar hijaunya dihapus.
+    p.tracks[1].clips.push(Clip {
+        id: "c".into(),
+        asset_id: Some("g".into()),
+        start: 0.0,
+        duration: 2.0,
+        transform: Transform { y: -250.0, scale: 0.5, ..Default::default() },
+        chroma: Chroma { enabled: true, ..Default::default() },
+        ..Default::default()
+    });
+    p.captions.enabled = true;
+    p.captions.style.animation = "pop".into();
+    p.captions.words = vec![Word { text: "efek".into(), start: 0.0, end: 1.0 }, Word { text: "keren".into(), start: 1.0, end: 4.0 }];
+
+    let out = dir.join("efek.mp4");
+    let plan = build_plan(&p, &ExportOptions { output: s(&out), quality: Quality::Fast, normalize_loudness: true, ..Default::default() }).unwrap();
+    run_export(&tools.ffmpeg, &dir.join("kerja"), &plan, Arc::new(AtomicBool::new(false)), |_| {}).expect("ekspor efek");
+    let o = s(&out);
+    let info = probe(&tools.ffprobe, &o).unwrap();
+    assert!((info.duration - 4.0).abs() < 0.15, "durasi {}", info.duration);
+
+    // Green screen: placement 270x203 di (135,129). Sudut klip (dulu hijau) kini transparan,
+    // kotak biru di tengahnya tetap ada.
+    let corner = pixel(&tools.ffmpeg, &o, 1.0, 145, 139);
+    assert!(!(corner[1] > 180 && corner[0] < 80 && corner[2] < 80), "latar hijau masih terlihat: {corner:?}");
+    let center = pixel(&tools.ffmpeg, &o, 1.0, 270, 230);
+    assert!(center[2] > 150 && center[1] < 100, "kotak biru hilang: {center:?}");
+
+    // Latar blur: di atas video lanskap (y=10) ada isi blur, bukan hitam polos.
+    let above = pixel(&tools.ffmpeg, &o, 1.0, 270, 820);
+    assert!(above.iter().map(|&c| c as u32).sum::<u32>() > 60, "latar blur kosong: {above:?}");
+
+    // Zoom masuk sampai 2x pada gradasi horizontal: di x=100 pandangan bergeser ke arah tengah,
+    // jadi nilainya naik dari ~82 (tanpa zoom) ke ~105 (zoom 2x).
+    let early = pixel(&tools.ffmpeg, &o, 2.05, 100, 300)[0] as u32;
+    let late = pixel(&tools.ffmpeg, &o, 3.9, 100, 300)[0] as u32;
+    assert!(late > early + 12, "zoom tidak terlihat: awal {early}, akhir {late}");
+
+    // Loudness diratakan mendekati -14 LUFS.
+    let lufs = integrated_lufs(&tools.ffmpeg, &o);
+    assert!((lufs + 14.0).abs() < 3.0, "loudness {lufs} LUFS");
 }

@@ -1,5 +1,5 @@
 //! Mengekspor file proyek dari baris perintah (tanpa UI), berguna untuk debugging:
-//!   cargo run -p cutkit-core --example render -- proyek.cutkit.json hasil.mp4 [fast|balanced|best]
+//!   cargo run -p cutkit-core --example render -- proyek.cutkit.json hasil.mp4 [fast|balanced|best] [--loudnorm]
 use cutkit_core::ffmpeg::{find_tools, run_export};
 use cutkit_core::*;
 use std::sync::atomic::AtomicBool;
@@ -18,7 +18,7 @@ fn main() {
         _ => Quality::Balanced,
     };
     let tools = find_tools(None).expect("ffmpeg tidak ditemukan");
-    let plan = build_plan(&project, &ExportOptions { output: args[2].clone(), encoder: Encoder::X264, quality }).expect("rencana ekspor");
+    let plan = build_plan(&project, &ExportOptions { output: args[2].clone(), encoder: Encoder::X264, quality, normalize_loudness: args.iter().any(|a| a == "--loudnorm") }).expect("rencana ekspor");
     let work = std::env::temp_dir().join("cutkit-render");
     let start = std::time::Instant::now();
     run_export(&tools.ffmpeg, &work, &plan, Arc::new(AtomicBool::new(false)), |p| eprint!("\r{:5.1}%  {}   ", p.percent, p.speed)).unwrap_or_else(|e| {
