@@ -36,12 +36,16 @@ Gambar dibagi sepanjang voice over. Klip video yang lebih pendek dari jatahnya d
 | Proyek | Buat dan buka proyek (file `.cutkit.json` di folder proyek), tersimpan otomatis, daftar proyek terakhir. Rasio 9:16, 1:1, 4:5, 3:4, 16:9; 24 sampai 60 fps |
 | Impor | Video, gambar, dan audio lewat tombol Impor atau seret dari Explorer langsung ke timeline/preview. File `.srt` yang diseret langsung jadi caption |
 | Timeline | Multi-track video dan audio, potong (split), pangkas kiri/kanan, geser dan pindah track, hapus (biasa atau tutup celah), tukar urutan, duplikat, lapisan track naik/turun, bisukan/sembunyikan track, zoom, snap ke tepi klip, playhead, dan awal kata caption |
-| Audio | Volume per klip 0 sampai 400%, fade in/out, gelombang suara di klip |
+| Audio | Volume per klip 0 sampai 400%, fade in/out, gelombang suara di klip, normalisasi loudness −14 LUFS (standar YouTube) saat ekspor |
+| Kecepatan | 0,1x sampai 10x per klip video/audio; suara dipercepat tanpa mengubah nada, klip sesudahnya ikut bergeser |
+| Gerak (Ken Burns) | Zoom masuk/keluar atau geser kiri/kanan/atas/bawah di dalam bingkai klip, dengan kekuatan yang bisa diatur. Wizard bisa memberi gerak otomatis ke semua gambar |
+| Latar blur | Video lanskap atau gambar yang tidak memenuhi 9:16 diberi latar versi blur dirinya sendiri, bukan pinggiran hitam |
+| Chroma key | Hapus latar hijau/biru (atau warna lain) pada meme green screen, dengan kemiripan dan kehalusan yang bisa diatur |
 | Undo/redo | Semua perubahan, termasuk geser di preview dan slider |
 | Overlay | Gambar/meme, GIF, klip video kecil, dan teks judul dengan posisi, skala, rotasi, dan opacity. Bisa diatur langsung di preview: seret untuk memindah, pojok untuk skala, bulatan atas untuk memutar (Shift = kelipatan 15°), scroll untuk skala |
 | Pustaka | Jelajahi folder aset, bawaannya `D:\Master\Pictures\Meme Templates` dan `D:\Master\Music\Sound Effect Meme`, dengan pencarian dan dengar contoh SFX. Folder lain bisa ditambah |
 | Teks | Preset judul (Impact bertepi, kotak hitam, kuning, merah, subjudul, kotak kuning), font, ukuran, warna, tepi, bayangan, kotak latar, tebal/miring |
-| Caption | Kata-per-kata dengan sorotan kata aktif (warna dan perbesaran), font, warna, tepi, kotak, huruf besar, jumlah kata per halaman, panjang baris, posisi (bisa diseret di preview). Sumber: ketik manual, impor `.srt`, atau impor JSON waktu per kata. Bisa diekspor lagi ke `.srt` atau JSON |
+| Caption | Kata-per-kata dengan sorotan kata aktif (warna, perbesaran, dan animasi pop), font, warna, tepi, kotak, huruf besar, jumlah kata per halaman, panjang baris, posisi (bisa diseret di preview). Sumber: ketik manual, impor `.srt`, atau impor JSON waktu per kata. Bisa diekspor lagi ke `.srt` atau JSON |
 | Preview | Video HTML5 + canvas untuk overlay, teks, dan caption. Format yang tidak bisa diputar WebView2 (MOV/HEVC, MKV, AVI, GIF, video di atas 1080p, dll.) otomatis dibuatkan proxy MP4 720p di cache |
 | Ekspor | MP4 H.264 + AAC 192 kbps lewat ffmpeg dengan progress bar, perkiraan sisa waktu, dan tombol batal. Encoder `libx264` (Cepat/Seimbang/Terbaik) atau Intel Quick Sync (`h264_qsv`) bila terdeteksi |
 
@@ -89,13 +93,17 @@ Proyek diubah menjadi satu perintah ffmpeg (lihat `crates/cutkit-core/src/export
 
 Filter graph ditulis ke file (`-/filter_complex`) sehingga proyek panjang tidak terbentur batas panjang baris perintah Windows. Rumus penempatan klip dan pembagian halaman caption ada di Rust dan JS sekaligus; tes `parity` memastikan keduanya sama sehingga preview cocok dengan hasil ekspor.
 
+## Asal ide fitur
+
+Beberapa fitur (kecepatan, Ken Burns, latar blur, chroma key, loudness, animasi pop caption) dipilih setelah menginventaris model editing CapCut 4.6 yang terpasang di laptop dengan REA: hanya nama kelas dan field dari tabel export DLL-nya (misalnya `MaterialSpeed`, `MaterialCanvas`, `MaterialChroma`, `MaterialLoudness`, `KeyframeVideo`) untuk melihat fitur apa yang umum di editor Shorts. Tidak ada kode, aset, template, atau efek CapCut yang disalin; semua implementasi di sini ditulis sendiri di atas ffmpeg.
+
 ## Batasan saat ini
 
 - Teks dan caption selalu berada di atas gambar/video (sama di preview dan ekspor).
 - Volume di atas 100% hanya terdengar di hasil ekspor; preview dibatasi 100%.
 - GIF animasi diputar satu kali; duplikat klipnya untuk mengulang.
 - Font harus terpasang di Windows. Preview dan ekspor memakai font yang sama, tapi tebal tepi bisa beda tipis.
-- Belum ada transisi antar klip, kecepatan putar, dan keyframe animasi.
+- Belum ada transisi antar klip dan keyframe bebas (gerak masih berupa preset zoom/geser).
 
 ## Struktur
 
@@ -147,7 +155,7 @@ node tests/harness/server.js 5187
 - `tests/captions.test.js`: parser SRT (BOM, CRLF, tag, blok rusak), JSON kata, alignment ElevenLabs, ekspor SRT/JSON.
 - `tests/parity.test.js` dan `crates/cutkit-core/tests/parity.rs`: fixture yang sama untuk penempatan klip dan halaman caption di JS dan Rust.
 - Tes unit Rust: model, probe (video HP diputar, GIF, MP3 bersampul), pembuat ASS, penyusun argumen ffmpeg (diperiksa tanpa menjalankan ffmpeg).
-- `crates/cutkit-core/tests/export_real.rs`: membuat klip sintetis dengan ffmpeg, mengekspor proyek berisi potongan, overlay berputar, SFX, teks, dan caption, lalu memeriksa hasilnya dengan ffprobe. Juga membuat semua media proyek contoh sungguhan. Dilewati bila ffmpeg tidak ada.
+- `crates/cutkit-core/tests/export_real.rs`: membuat klip sintetis dengan ffmpeg, mengekspor proyek berisi potongan, overlay berputar, SFX, teks, dan caption, lalu memeriksa hasilnya dengan ffprobe. Juga membuat semua media proyek contoh sungguhan, dan satu proyek berisi semua efek (kecepatan, latar blur, zoom, chroma key, caption pop, loudness) yang hasilnya diperiksa piksel per piksel dan diukur dengan ebur128. Dilewati bila ffmpeg tidak ada.
 - `tests/timeline.test.js` juga menguji susun otomatis: pembagian durasi, potongan menempel ke awal kata, musik, dan caption.
 
 ## Lisensi
