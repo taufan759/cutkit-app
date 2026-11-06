@@ -129,6 +129,7 @@ function changed(opts = {}) {
   renderBin();
   updateUndo();
   updateDuration();
+  updateEmptyHints();
 }
 
 function markDirty() {
@@ -287,7 +288,8 @@ function welcome() {
     el("div", { class: "big-actions" },
       el("button", { class: "btn primary", onclick: () => quickDialog({ fromWelcome: true }) }, "⚡ Buat Shorts cepat", el("small", {}, "dari voice over + gambar")),
       el("button", { class: "btn", onclick: newProjectDialog }, "＋ Proyek kosong", el("small", {}, "susun sendiri dari awal")),
-      el("button", { class: "btn", onclick: openProjectDialog }, "📂 Buka proyek", el("small", {}, "file .cutkit.json"))),
+      el("button", { class: "btn", onclick: openProjectDialog }, "📂 Buka proyek", el("small", {}, "file .cutkit.json")),
+      el("button", { class: "btn", id: "demo-btn", onclick: () => demoProject() }, "🎬 Coba contoh", el("small", {}, "proyek latihan siap putar"))),
     recents.length ? el("h4", {}, "Terakhir dibuka") : null,
     recents.length ? el("div", { class: "recent" }, recents.map((r) => el("button", { onclick: () => openProjectPath(r.path) },
       el("span", {}, r.name || baseName(r.path)), el("span", { class: "p" }, r.path)))) : null));
@@ -1327,6 +1329,135 @@ async function runQuick(sel, newName) {
   toast(`Timeline tersusun: ${visuals.length} visual${voice ? ", voice over" : ""}${words ? `, ${words.length} kata caption` : ""}${music ? ", musik" : ""}. Tekan Spasi untuk memutar.`);
 }
 
+/* ---------- untuk pemula: contoh proyek, cek sistem, panduan ---------- */
+
+async function demoProject() {
+  if (!state.tools) {
+    toast("Contoh proyek butuh ffmpeg. Pasang dulu lewat Cek sistem.", true);
+    return systemDialog();
+  }
+  openModal(el("h2", {}, "Menyiapkan contoh proyek…"), el("p", { class: "hint" }, "Membuat narasi, gambar latar, klip, dan musik contoh dengan ffmpeg. Biasanya beberapa detik."), el("div", { class: "progress indeterminate" }, el("div")));
+  try {
+    let parent;
+    try { parent = joinPath(await tauri.path.documentDir(), "CutKit"); } catch { parent = "C:\\CutKit"; }
+    const media = await invoke("make_demo", { dir: joinPath(joinPath(parent, "Contoh CutKit"), "media") });
+    await runQuick({ voice: media.voice, visuals: media.visuals, music: media.music, caption: null, script: media.script, musicVolume: 15, fit: "cover", capPreset: 0 }, "Contoh CutKit");
+    commit((p) => {
+      const title = TL.textClip("CONTOH CUTKIT", { y: -640, duration: 2.5, style: { size: 110, outline: 7 } });
+      const track = TL.trackFor(p, title, 0);
+      TL.insertClip(p, track.id, title, 0);
+    });
+    state.selected = null;
+    renderInspector();
+    if (!localStorage.getItem("cutkit.tourDone")) setTimeout(startTour, 400);
+  } catch (e) {
+    openModal(el("h2", {}, "Contoh proyek gagal dibuat"), el("pre", { style: "white-space:pre-wrap;font-size:12px;color:var(--danger)" }, errMsg(e)),
+      el("div", { class: "modal-actions" }, el("button", { class: "btn primary", onclick: welcome }, "Kembali")));
+  }
+}
+
+function fmtBytes(n) {
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  if (n < 1024 ** 3) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 ** 3).toFixed(2)} GB`;
+}
+
+function onToolsReady(tools) {
+  state.tools = tools;
+  $("#ffmpeg-banner").classList.add("hidden");
+}
+
+async function systemDialog(autoInstall = false) {
+  const body = el("div", { class: "checks" }, el("p", { class: "hint" }, "Memeriksa…"));
+  const log = el("pre", { class: "setup-log hidden" });
+  const actions = el("div", { class: "modal-actions" }, el("button", { class: "btn", onclick: () => (state.path ? closeModal() : welcome()) }, "Tutup"));
+  openModal(el("h2", {}, "Cek sistem"), body, log, actions);
+  let info;
+  try { info = await invoke("system_info"); } catch (e) { body.replaceChildren(el("p", { class: "hint" }, errMsg(e))); return; }
+  const item = (ok, title, detail) => el("div", { class: "check-row" + (ok === true ? " ok" : ok === false ? " bad" : "") },
+    el("span", { class: "mark" }, ok === true ? "✓" : ok === false ? "✕" : "–"), el("div", {}, el("b", {}, title), el("div", { class: "hint" }, detail)));
+  const t = info.tools;
+  const install = el("button", { class: "btn primary" }, "Pasang ffmpeg otomatis");
+  const clearBtn = el("button", { class: "btn small" }, "Bersihkan cache");
+  clearBtn.addEventListener("click", async () => {
+    try { const freed = await invoke("clear_cache"); toast(`Cache dibersihkan (${fmtBytes(freed)}). Preview dibuat ulang saat dibutuhkan.`); systemDialog(); }
+    catch (e) { toast(errMsg(e), true); }
+  });
+  body.replaceChildren(
+    item(!!t, t ? `ffmpeg ${t.version}` : "ffmpeg belum terpasang", t ? t.ffmpeg : "Dibutuhkan untuk impor, preview format khusus, dan ekspor."),
+    item(t ? (t.has_qsv ? true : null) : null, t && t.has_qsv ? "Intel Quick Sync tersedia" : "Intel Quick Sync tidak terdeteksi", t && t.has_qsv ? "Pilih encoder Quick Sync saat ekspor agar lebih cepat dan hemat baterai." : "Ekspor memakai CPU (libx264); hasil tetap sama bagusnya."),
+    item(info.winget ? true : null, info.winget ? "winget tersedia" : "winget tidak ditemukan", info.winget ? "Dipakai untuk memasang dan memperbarui ffmpeg." : "Pasang \"App Installer\" dari Microsoft Store bila ingin memasang ffmpeg otomatis."),
+    el("div", { class: "check-row" }, el("span", { class: "mark" }, "🗂"), el("div", {}, el("b", {}, `Cache preview ${fmtBytes(info.cache_bytes)}`), el("div", { class: "hint" }, info.cache_dir)), clearBtn));
+  if (!t && info.winget) actions.prepend(install);
+  install.addEventListener("click", async () => {
+    install.disabled = true;
+    install.textContent = "Memasang… (bisa beberapa menit)";
+    log.classList.remove("hidden");
+    log.textContent = "winget install Gyan.FFmpeg\n";
+    const un = await tauri.event.listen("setup-log", (ev) => {
+      const lines = log.textContent.split("\n");
+      // Baris progres winget (persen/bar) menimpa baris terakhir, seperti di terminal.
+      if (/[█▒]|\d+%|MB \/|KB \//.test(ev.payload) && /[█▒]|\d+%|MB \/|KB \//.test(lines[lines.length - 1])) lines[lines.length - 1] = ev.payload;
+      else lines.push(ev.payload);
+      log.textContent = lines.slice(-60).join("\n");
+      log.scrollTop = log.scrollHeight;
+    });
+    try {
+      const tools = await invoke("install_ffmpeg");
+      onToolsReady(tools);
+      toast(`ffmpeg ${tools.version} siap dipakai.`);
+      systemDialog();
+    } catch (e) {
+      log.textContent += `\n\nGagal: ${errMsg(e)}`;
+      install.disabled = false;
+      install.textContent = "Coba lagi";
+    } finally { un(); }
+  });
+  if (autoInstall && !t && info.winget) install.click();
+}
+
+const TOUR = [
+  { sel: ".panel.left", text: "Media: impor video, gambar, dan audio di sini (atau seret file dari Explorer). Klik ＋ untuk menaruh ke timeline." },
+  { sel: "#left-tabs [data-tab=library]", text: "Pustaka: meme dan sound effect dari foldermu. Seret ke timeline atau ke preview." },
+  { sel: "#left-tabs [data-tab=captions]", text: "Caption: impor .srt atau JSON kata dari VoiceKit, atau ketik naskah. Kata yang sedang diucapkan disorot." },
+  { sel: ".preview-area", text: "Preview: klik gambar/teks untuk memilih, seret untuk memindah, tarik pojok untuk memperbesar, bulatan atas untuk memutar." },
+  { sel: "#inspector", text: "Inspector: atur posisi, skala, rotasi, transparansi, volume, dan fade klip yang dipilih." },
+  { sel: ".tl-toolbar", text: "Timeline: S memotong di playhead, Delete menghapus, Ctrl+Z membatalkan. Seret tepi klip untuk memangkas." },
+  { sel: "#export-btn", text: "Selesai? Klik Ekspor untuk membuat MP4 1080×1920 siap upload ke YouTube Shorts." },
+];
+
+function startTour(i = 0) {
+  document.querySelectorAll(".tour").forEach((n) => n.remove());
+  const step = TOUR[i];
+  if (!step) { localStorage.setItem("cutkit.tourDone", "1"); return; }
+  const target = document.querySelector(step.sel);
+  if (!target) return startTour(i + 1);
+  const r = target.getBoundingClientRect();
+  const spot = el("div", { class: "tour-spot", style: `left:${r.left - 4}px;top:${r.top - 4}px;width:${r.width + 8}px;height:${r.height + 8}px` });
+  const end = () => { document.querySelectorAll(".tour").forEach((n) => n.remove()); localStorage.setItem("cutkit.tourDone", "1"); };
+  const bubble = el("div", { class: "tour-bubble" },
+    el("div", { class: "hint" }, `Panduan ${i + 1}/${TOUR.length}`),
+    el("p", {}, step.text),
+    el("div", { class: "modal-actions" },
+      el("button", { class: "btn small ghost", onclick: end }, "Lewati"),
+      el("button", { class: "btn small primary", onclick: () => startTour(i + 1) }, i === TOUR.length - 1 ? "Selesai" : "Lanjut →")));
+  const wrap = el("div", { class: "tour" }, spot, bubble);
+  document.body.append(wrap);
+  const b = bubble.getBoundingClientRect();
+  let left = r.right + 14;
+  let top = r.top;
+  if (left + b.width > innerWidth - 10) { left = r.left - b.width - 14; }
+  if (left < 10) { left = Math.min(Math.max(10, r.left), innerWidth - b.width - 10); top = r.bottom + 12; }
+  if (top + b.height > innerHeight - 10) top = Math.max(10, r.top - b.height - 12);
+  bubble.style.left = `${left}px`;
+  bubble.style.top = `${Math.max(10, top)}px`;
+}
+
+function updateEmptyHints() {
+  const empty = TL.duration(state.project) <= 0;
+  $("#empty-hint").classList.toggle("hidden", !empty);
+}
+
 /* ---------- ekspor ---------- */
 
 function exportDialog() {
@@ -1517,6 +1648,9 @@ function switchTab(tab) {
 function wire() {
   document.querySelectorAll("#left-tabs button").forEach((b) => b.addEventListener("click", () => switchTab(b.dataset.tab)));
   $("#import-btn").addEventListener("click", pickAndImport);
+  $("#empty-import").addEventListener("click", pickAndImport);
+  $("#empty-quick").addEventListener("click", () => quickDialog());
+  $("#empty-demo").addEventListener("click", () => demoProject());
   $("#lib-search").addEventListener("input", (e) => { state.lib.filter = e.target.value; state.lib.shown = LIB_PAGE; renderLibrary(); });
   $("#undo-btn").addEventListener("click", undo);
   $("#redo-btn").addEventListener("click", redo);
@@ -1556,6 +1690,9 @@ function wire() {
     else if (cmd === "saveas") saveAs().catch((err) => toast(errMsg(err), true));
     else if (cmd === "reveal" && state.path) invoke("reveal_path", { path: state.path });
     else if (cmd === "shortcuts") shortcutsDialog();
+    else if (cmd === "tour") startTour();
+    else if (cmd === "system") systemDialog();
+    else if (cmd === "demo") demoProject();
   });
 
   const canvas = $("#preview");
@@ -1659,7 +1796,9 @@ async function init() {
     state.tools = await invoke("tools_info");
   } catch (e) {
     const b = $("#ffmpeg-banner");
-    b.replaceChildren(el("b", {}, "ffmpeg tidak ditemukan. "), "Impor dan ekspor butuh ffmpeg. Pasang lewat terminal: ", el("code", {}, "winget install Gyan.FFmpeg"), ", lalu buka ulang CutKit.");
+    b.replaceChildren(el("b", {}, "ffmpeg belum terpasang. "), "Impor dan ekspor butuh ffmpeg. ",
+      el("button", { class: "btn small primary", onclick: () => systemDialog(true) }, "Pasang otomatis"), " ",
+      el("span", { class: "hint" }, "atau lewat terminal: "), el("code", {}, "winget install Gyan.FFmpeg"));
     b.classList.remove("hidden");
   }
 }

@@ -19,6 +19,10 @@
         <button data-cmd="saveas">Simpan sebagai…</button>
         <hr>
         <button data-cmd="reveal">Buka folder proyek</button>
+        <hr>
+        <button data-cmd="demo">🎬 Contoh proyek</button>
+        <button data-cmd="tour">Panduan singkat</button>
+        <button data-cmd="system">Cek sistem & ffmpeg</button>
         <button data-cmd="shortcuts">Pintasan keyboard</button>
       </div>
     </div>
@@ -75,6 +79,13 @@
       <div class="preview-area" id="preview-area">
         <canvas id="preview"></canvas>
         <div class="drop-hint hidden" id="drop-hint">Lepas untuk menambahkan</div>
+        <div class="empty-hint hidden" id="empty-hint">
+          <h3>Mulai dari sini</h3>
+          <p>Seret video, gambar, atau audio ke jendela ini, atau:</p>
+          <button class="btn primary" id="empty-quick">⚡ Buat Shorts cepat</button>
+          <button class="btn" id="empty-import">＋ Impor media</button>
+          <button class="btn ghost" id="empty-demo">🎬 Coba contoh proyek</button>
+        </div>
       </div>
       <div class="transport">
         <span class="tc" id="tc-now">00:00:00</span>

@@ -60,12 +60,22 @@ const commands = {
   write_text: ({ path: p, text }) => { fs.writeFileSync(p, text); return null; },
   write_base64: ({ path: p, data }) => { fs.writeFileSync(p, Buffer.from(data.replace(/^data:[^,]+,/, ""), "base64")); return null; },
   list_dir: ({ path: p }) => fs.readdirSync(p, { withFileTypes: true })
-    .filter((d) => d.isDirectory() || /\.(mp4|mov|mkv|webm|gif|png|jpe?g|webp|bmp|mp3|wav|m4a|ogg|flac)$/i.test(d.name))
+    .filter((d) => d.isDirectory() || /\.(mp4|mov|mkv|webm|gif|png|jpe?g|webp|bmp|mp3|wav|m4a|ogg|flac|srt|json)$/i.test(d.name))
     .map((d) => ({ name: d.name, path: path.join(p, d.name), is_dir: d.isDirectory() }))
     .sort((a, b) => (b.is_dir - a.is_dir) || a.name.localeCompare(b.name)),
   path_exists: ({ path: p }) => fs.existsSync(p),
   export_start: ({ project, options }) => { lastExport = { project, options }; return null; },
   export_cancel: () => null,
+  system_info: () => ({ tools: commands.tools_info(), winget: true, cache_dir: CACHE, cache_bytes: 12345678 }),
+  clear_cache: () => 12345678,
+  install_ffmpeg: () => commands.tools_info(),
+  // Memakai media yang dibuat tes Rust `demo_media_is_generated` (cargo test).
+  make_demo: () => {
+    const dir = path.join(require("node:os").tmpdir(), "cutkit-test", "demo");
+    const f = (n) => path.join(dir, n);
+    if (!fs.existsSync(f("01-narasi.wav"))) throw new Error("Jalankan dulu: cargo test -p cutkit-core --test export_real");
+    return { voice: f("01-narasi.wav"), music: f("musik.wav"), visuals: ["01-latar.png", "02-klip.mp4", "03-latar.png", "04-klip.mp4", "05-latar.png"].map(f), script: "Halo semua! Ini contoh proyek CutKit. Coba potong klip, tambah meme dan caption, lalu ekspor video kamu." };
+  },
   open_path: () => null,
   reveal_path: () => null,
 };
