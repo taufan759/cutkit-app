@@ -391,11 +391,17 @@
             // Sama dengan ekspor: cover ke kanvas lalu boxblur (radius kanvas/27, dua putaran ~ gaussian 0.8r).
             const sw = source.videoWidth || source.naturalWidth || 1;
             const sh = source.videoHeight || source.naturalHeight || 1;
-            const s = Math.max(p.canvas.width / sw, p.canvas.height / sh);
             const r = Math.max(4, Math.round(Math.min(p.canvas.width, p.canvas.height) / 27));
             ctx.save();
             ctx.filter = `blur(${(r * 0.8 * k).toFixed(1)}px)`;
-            ctx.drawImage(source, (p.canvas.width - sw * s) / 2, (p.canvas.height - sh * s) / 2, sw * s, sh * s);
+            // Digambar lebih besar 3r di tiap sisi: blur canvas mengambil piksel transparan di luar tepi,
+            // sedangkan boxblur ffmpeg menjepit tepi; tanpa ini pinggiran preview menggelap.
+            const pad = r * 3;
+            const s2 = Math.max((p.canvas.width + pad * 2) / sw, (p.canvas.height + pad * 2) / sh);
+            ctx.beginPath();
+            ctx.rect(0, 0, p.canvas.width, p.canvas.height);
+            ctx.clip();
+            ctx.drawImage(source, (p.canvas.width - sw * s2) / 2, (p.canvas.height - sh * s2) / 2, sw * s2, sh * s2);
             ctx.restore();
           }
           if (source && clip.chroma && clip.chroma.enabled) source = this._keyed(clip, source, pl, k);
