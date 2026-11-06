@@ -613,6 +613,106 @@ fn reveal_path(app: AppHandle, path: String) -> Result<(), String> {
     app.opener().reveal_item_in_dir(path).map_err(|e| e.to_string())
 }
 
+/* ---------- MCP: menghubungkan CutKit ke Claude ---------- */
+
+#[derive(Serialize)]
+struct McpClient {
+    id: String,
+    name: String,
+    path: String,
+    /// Folder klien ada (aplikasinya kemungkinan terpasang).
+    detected: bool,
+    installed: bool,
+    /// Path server yang terdaftar sekarang (bisa milik instalasi lama).
+    registered_server: Option<String>,
+}
+
+#[derive(Serialize)]
+struct McpInfo {
+    server: Option<String>,
+    cli: Option<String>,
+    node: Option<String>,
+    /// Perintah untuk Claude Code di terminal.
+    command_line: String,
+    /// Potongan JSON untuk klien lain.
+    snippet: String,
+    clients: Vec<McpClient>,
+}
+
+/// Lokasi server MCP: folder resource aplikasi terpasang, atau repo saat pengembangan.
+fn mcp_server_path(app: &AppHandle) -> Option<PathBuf> {
+    let mut candidates = vec![];
+    if let Ok(r) = app.path().resource_dir() {
+        candidates.push(r.join("mcp").join("server.js"));
+    }
+    candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("mcp").join("server.js"));
+    candidates.into_iter().find(|p| p.is_file()).map(|p| PathBuf::from(p.to_string_lossy().trim_start_matches(r"\\?\").to_string()))
+}
+
+fn mcp_cli_path(server: &Path) -> Option<PathBuf> {
+    let dir = server.parent()?;
+    [dir.join("cutkit-cli.exe"), dir.join("..").join("target").join("release").join("cutkit-cli.exe")].into_iter().find(|p| p.is_file())
+}
+
+/// Path dengan garis miring biasa agar mudah dibaca di JSON dan perintah.
+fn slash(p: &Path) -> String {
+    p.to_string_lossy().replace('\\', "/").replace("/./", "/")
+}
+
+#[tauri::command]
+fn mcp_info(app: AppHandle) -> McpInfo {
+    let server = mcp_server_path(&app).map(|p| std::fs::canonicalize(&p).map(|c| PathBuf::from(c.to_string_lossy().trim_start_matches(r"\\?\").to_string())).unwrap_or(p));
+    let cli = server.as_deref().and_then(mcp_cli_path);
+    let node = cutkit_core::mcpcfg::find_node();
+    let server_s = server.as_deref().map(slash).unwrap_or_default();
+    let clients = cutkit_core::mcpcfg::clients()
+        .into_iter()
+        .map(|(id, name, path)| {
+            let registered = cutkit_core::mcpcfg::entry(&path, "cutkit");
+            let registered_server = registered.as_ref().and_then(|v| v["args"].get(0)).and_then(|v| v.as_str()).map(String::from);
+            McpClient {
+                id: id.into(),
+                name: name.into(),
+                detected: path.parent().map(|d| d.is_dir()).unwrap_or(false),
+                installed: registered_server.as_deref().map(|s| s.replace('\\', "/").eq_ignore_ascii_case(&server_s)).unwrap_or(false),
+                registered_server,
+                path: path.to_string_lossy().to_string(),
+            }
+        })
+        .collect();
+    McpInfo {
+        command_line: format!("claude mcp add --scope user cutkit -- node \"{server_s}\""),
+        snippet: serde_json::to_string_pretty(&serde_json::json!({ "mcpServers": { "cutkit": { "command": "node", "args": [server_s] } } })).unwrap(),
+        server: server.as_deref().map(slash),
+        cli: cli.as_deref().map(slash),
+        node,
+        clients,
+    }
+}
+
+/// Mendaftarkan server MCP CutKit ke klien yang dipilih (dengan cadangan file lama).
+#[tauri::command]
+fn mcp_install(app: AppHandle, client: String) -> Result<Option<String>, String> {
+    let server = mcp_server_path(&app).ok_or("File server MCP tidak ditemukan di folder aplikasi. Pasang ulang CutKit.")?;
+    let server = std::fs::canonicalize(&server).map(|c| PathBuf::from(c.to_string_lossy().trim_start_matches(r"\\?\").to_string())).unwrap_or(server);
+    let node = cutkit_core::mcpcfg::find_node().ok_or("Node.js belum terpasang. Pasang dulu: winget install OpenJS.NodeJS.LTS")?;
+    let (_, _, path) = cutkit_core::mcpcfg::clients().into_iter().find(|(id, _, _)| *id == client).ok_or("Klien tidak dikenal")?;
+    let backup = cutkit_core::mcpcfg::install(&path, "cutkit", &node, &[slash(&server)])?;
+    Ok(backup.map(|b| b.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+fn mcp_uninstall(client: String) -> Result<bool, String> {
+    let (_, _, path) = cutkit_core::mcpcfg::clients().into_iter().find(|(id, _, _)| *id == client).ok_or("Klien tidak dikenal")?;
+    cutkit_core::mcpcfg::uninstall(&path, "cutkit")
+}
+
+/// Proyek yang diminta lewat baris perintah (`cutkit-app.exe proyek.cutkit.json`), mis. dari MCP.
+#[tauri::command]
+fn launch_project() -> Option<String> {
+    std::env::args().skip(1).find(|a| a.to_lowercase().ends_with(".json") && Path::new(a).is_file())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -666,7 +766,11 @@ fn main() {
             matting_setup,
             remove_bg,
             open_path,
-            reveal_path
+            reveal_path,
+            mcp_info,
+            mcp_install,
+            mcp_uninstall,
+            launch_project
         ])
         .run(tauri::generate_context!())
         .expect("CutKit gagal dijalankan");

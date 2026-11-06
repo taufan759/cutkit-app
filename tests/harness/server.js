@@ -153,7 +153,24 @@ const commands = {
   },
   open_path: () => null,
   reveal_path: () => null,
+  launch_project: () => null,
+  // MCP: status klien disimulasikan di memori; config Claude asli tidak disentuh.
+  mcp_info: () => {
+    const server = path.resolve(__dirname, "../../mcp/server.js").replace(/\\/g, "/");
+    return {
+      server, cli: path.resolve(__dirname, "../../target/release/cutkit-cli.exe").replace(/\\/g, "/"), node: process.execPath,
+      command_line: `claude mcp add --scope user cutkit -- node "${server}"`,
+      snippet: JSON.stringify({ mcpServers: { cutkit: { command: "node", args: [server] } } }, null, 2),
+      clients: [
+        { id: "claude-code", name: "Claude Code (juga tab Code di aplikasi Claude)", path: "C:\\Users\\uji\\.claude.json", detected: true, installed: mcpState["claude-code"], registered_server: mcpState["claude-code"] ? server : null },
+        { id: "claude-desktop", name: "Claude Desktop (chat)", path: "C:\\Users\\uji\\AppData\\Roaming\\Claude\\claude_desktop_config.json", detected: false, installed: mcpState["claude-desktop"], registered_server: mcpState["claude-desktop"] ? server : null },
+      ],
+    };
+  },
+  mcp_install: ({ client }) => { mcpState[client] = true; return "C:\\Users\\uji\\.claude.json.cutkit-backup"; },
+  mcp_uninstall: ({ client }) => { const was = mcpState[client]; mcpState[client] = false; return was; },
 };
+const mcpState = { "claude-code": false, "claude-desktop": false };
 let lastExport = null;
 
 const MOCK = `

@@ -290,7 +290,8 @@ function welcome() {
       el("button", { class: "btn", onclick: newProjectDialog }, "＋ Proyek kosong", el("small", {}, "susun sendiri dari awal")),
       el("button", { class: "btn", onclick: openProjectDialog }, "📂 Buka proyek", el("small", {}, "file .cutkit.json")),
       el("button", { class: "btn", onclick: () => templateDialog() }, "📐 Dari template", el("small", {}, "susunan siap pakai, tinggal ganti media")),
-      el("button", { class: "btn", id: "demo-btn", onclick: () => demoProject() }, "🎬 Coba contoh", el("small", {}, "proyek latihan siap putar"))),
+      el("button", { class: "btn", id: "demo-btn", onclick: () => demoProject() }, "🎬 Coba contoh", el("small", {}, "proyek latihan siap putar")),
+      el("button", { class: "btn", onclick: () => mcpDialog() }, "🤖 Pakai lewat Claude", el("small", {}, "minta Claude yang mengedit (MCP)"))),
     recents.length ? el("h4", {}, "Terakhir dibuka") : null,
     recents.length ? el("div", { class: "recent" }, recents.map((r) => el("button", { onclick: () => openProjectPath(r.path) },
       el("span", {}, r.name || baseName(r.path)), el("span", { class: "p" }, r.path)))) : null));
@@ -2356,6 +2357,7 @@ function wire() {
     else if (cmd === "tour") startTour();
     else if (cmd === "system") systemDialog();
     else if (cmd === "demo") demoProject();
+    else if (cmd === "mcp") mcpDialog();
   });
 
   const canvas = $("#preview");
@@ -2446,6 +2448,71 @@ function wire() {
   document.fonts && document.fonts.ready.then(() => { window.CK.text.resetFonts(); preview.invalidate(); });
 }
 
+/* ---------- MCP: CutKit dipakai lewat Claude ---------- */
+
+const MCP_EXAMPLES = [
+  "Pakai CutKit: buat Shorts dari folder D:\\Konten\\Video1 (voice over + gambar), caption kuning, lalu ekspor.",
+  "Pakai CutKit: kasih caption otomatis ke video D:\\Rekaman\\vlog.mp4 dan ekspor versi bercaption.",
+  "Pakai CutKit: cari meme kaget di Meme Templates dan SFX boom, taruh di detik 5 proyek D:\\Konten\\Shorts.cutkit.json.",
+  "Pakai CutKit: jadikan naskah ini suara dan video dengan gambar dari folder D:\\Gambar: \"...\"",
+];
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const t = el("textarea", { style: "position:fixed;opacity:0" }, text);
+    document.body.append(t); t.select(); document.execCommand("copy"); t.remove();
+  }
+  toast("Disalin.");
+}
+
+async function mcpDialog() {
+  const body = el("div", { class: "checks" }, el("p", { class: "hint" }, "Memeriksa…"));
+  openModal(el("h2", {}, "🤖 Hubungkan ke Claude (MCP)"),
+    el("p", { class: "hint" }, "MCP membuat Claude bisa memakai CutKit langsung dari percakapan. Kamu cukup mengetik permintaan, misalnya \"buatkan Shorts dari folder ini, kasih caption kuning, lalu ekspor\". Claude yang mengimpor media, menyusun timeline, membuat caption dari suara, mengecek hasilnya per frame, dan mengekspor MP4. Hasilnya proyek CutKit biasa yang bisa kamu rapikan lagi di sini."),
+    body,
+    el("div", { class: "modal-actions" }, el("button", { class: "btn", onclick: () => (state.path ? closeModal() : welcome()) }, "Tutup")));
+  let info;
+  try { info = await invoke("mcp_info"); } catch (e) { body.replaceChildren(el("p", { class: "hint" }, errMsg(e))); return; }
+  const item = (ok, title, detail, action) => el("div", { class: "check-row" + (ok === true ? " ok" : ok === false ? " bad" : "") },
+    el("span", { class: "mark" }, ok === true ? "✓" : ok === false ? "✕" : "–"), el("div", {}, el("b", {}, title), el("div", { class: "hint" }, detail)), action || el("span"));
+  const ready = !!(info.server && info.cli && info.node);
+  const rows = [
+    item(!!info.server && !!info.cli, info.server && info.cli ? "Server MCP CutKit siap" : "Server MCP tidak lengkap", info.server ? info.server : "File mcp/server.js tidak ditemukan. Pasang ulang CutKit."),
+    item(!!info.node, info.node ? "Node.js terpasang" : "Node.js belum terpasang", info.node || "Server MCP dijalankan dengan Node.js. Pasang lewat terminal: winget install OpenJS.NodeJS.LTS, lalu buka ulang jendela ini."),
+    el("h4", {}, "1. Pilih aplikasi Claude yang dipakai"),
+  ];
+  for (const c of info.clients) {
+    const btn = el("button", { class: "btn small" + (c.installed ? "" : " primary"), disabled: !ready && !c.installed }, c.installed ? "Putuskan" : c.registered_server ? "Perbarui" : "Hubungkan");
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      try {
+        if (c.installed) { await invoke("mcp_uninstall", { client: c.id }); toast(`CutKit diputus dari ${c.name}.`); }
+        else {
+          const backup = await invoke("mcp_install", { client: c.id });
+          toast(`Terhubung ke ${c.name}. Tutup lalu buka ulang Claude supaya tool CutKit muncul.${backup ? " Cadangan config lama: " + backup : ""}`);
+        }
+      } catch (e) { toast(errMsg(e), true); }
+      mcpDialog();
+    });
+    const status = c.installed ? "Terhubung" : c.registered_server ? `Terdaftar ke lokasi lain (${c.registered_server})` : c.detected ? "Belum terhubung" : "Aplikasinya belum terdeteksi di komputer ini";
+    rows.push(item(c.installed ? true : null, c.name, `${status} · ${c.path}`, btn));
+  }
+  rows.push(
+    el("h4", {}, "2. Buka ulang Claude, lalu coba minta"),
+    ...MCP_EXAMPLES.map((t) => el("div", { class: "check-row" }, el("span", { class: "mark" }, "💬"), el("div", { class: "hint", style: "user-select:text;word-break:normal" }, t),
+      el("button", { class: "btn small", onclick: () => copyText(t) }, "Salin"))),
+    el("p", { class: "hint" }, "Di Claude Desktop juga ada menu prompt siap pakai dari CutKit: Buat Shorts dari folder, Caption otomatis, dan Video dari naskah. Model AI (Whisper, Piper, hapus background) memakai folder model yang sama dengan aplikasi ini."),
+    el("details", {}, el("summary", {}, "Pasang manual (klien MCP lain)"),
+      el("p", { class: "hint" }, "Claude Code lewat terminal:"),
+      el("pre", { class: "setup-log", style: "user-select:text" }, info.command_line),
+      el("button", { class: "btn small", onclick: () => copyText(info.command_line) }, "Salin perintah"),
+      el("p", { class: "hint" }, "Klien lain (tambahkan ke file konfigurasi MCP-nya):"),
+      el("pre", { class: "setup-log", style: "user-select:text" }, info.snippet),
+      el("button", { class: "btn small", onclick: () => copyText(info.snippet) }, "Salin JSON")));
+  body.replaceChildren(...rows);
+}
+
 async function init() {
   wire();
   renderTextPresets();
@@ -2454,7 +2521,9 @@ async function init() {
   changed();
   state.dirty = false;
   setStatus("");
-  welcome();
+  let launched = null;
+  try { launched = await invoke("launch_project"); } catch { /* */ }
+  if (launched) openProjectPath(launched); else welcome();
   try {
     state.tools = await invoke("tools_info");
   } catch (e) {

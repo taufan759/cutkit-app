@@ -10,6 +10,7 @@ pub mod export;
 pub mod ffmpeg;
 pub mod layout;
 pub mod matting;
+pub mod mcpcfg;
 pub mod model;
 pub mod probe;
 pub mod proxy;
