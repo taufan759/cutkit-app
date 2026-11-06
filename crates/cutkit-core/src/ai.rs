@@ -54,6 +54,36 @@ pub const MODELS: &[ModelInfo] = &[
         size: 539_212_467,
     },
     ModelInfo {
+        id: "piper-engine",
+        kind: "piper-engine",
+        label: "Mesin TTS Piper",
+        note: "22 MB. Program TTS offline (rhasspy/piper 2023.11.14-2, MIT).",
+        file: "piper_windows_amd64.zip",
+        url: "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip",
+        sha256: "f3c58906402b24f3a96d92145f58acba6d86c9b5db896d207f78dc80811efcea",
+        size: 22_477_236,
+    },
+    ModelInfo {
+        id: "piper-id",
+        kind: "piper-voice",
+        label: "Suara Indonesia (news_tts)",
+        note: "63 MB. Suara pria Bahasa Indonesia dari rhasspy/piper-voices.",
+        file: "id_ID-news_tts-medium.onnx",
+        url: "https://huggingface.co/rhasspy/piper-voices/resolve/main/id/id_ID/news_tts/medium/id_ID-news_tts-medium.onnx",
+        sha256: "ed8f02aa593f7af6b19acbdb8142e0da0dd72f46194eb33d38e0eb10a52597e8",
+        size: 62_950_044,
+    },
+    ModelInfo {
+        id: "piper-id-config",
+        kind: "piper-config",
+        label: "Pengaturan suara Indonesia",
+        note: "5 KB.",
+        file: "id_ID-news_tts-medium.onnx.json",
+        url: "https://huggingface.co/rhasspy/piper-voices/resolve/main/id/id_ID/news_tts/medium/id_ID-news_tts-medium.onnx.json",
+        sha256: "1ef677072668a5e172e0759b1d3871f129009d1167f093325a17607f7add5ad7",
+        size: 5_050,
+    },
+    ModelInfo {
         id: "vad-silero",
         kind: "vad",
         label: "Deteksi suara (Silero VAD)",
@@ -70,8 +100,29 @@ pub fn model(id: &str) -> Option<&'static ModelInfo> {
 }
 
 /// Model dianggap terpasang bila file ada dan ukurannya cocok (hash dicek saat unduh).
+/// Mesin Piper dianggap terpasang bila piper.exe hasil ekstraksinya ada.
 pub fn is_installed(dir: &Path, m: &ModelInfo) -> bool {
+    if m.kind == "piper-engine" {
+        return piper_exe(dir).is_file();
+    }
     std::fs::metadata(dir.join(m.file)).map(|md| md.len() == m.size).unwrap_or(false)
+}
+
+/// Lokasi piper.exe setelah zip mesin diekstrak ke folder model.
+pub fn piper_exe(dir: &Path) -> std::path::PathBuf {
+    dir.join("piper").join(if cfg!(windows) { "piper.exe" } else { "piper" })
+}
+
+/// Mengekstrak zip mesin Piper dengan tar bawaan Windows 10/11, lalu menghapus zip-nya.
+pub fn extract_engine(dir: &Path, m: &ModelInfo) -> Result<(), String> {
+    let zip = dir.join(m.file);
+    let tar = if cfg!(windows) { std::path::PathBuf::from(std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into())).join("System32").join("tar.exe") } else { "tar".into() };
+    let out = std::process::Command::new(tar).arg("-xf").arg(&zip).arg("-C").arg(dir).output().map_err(|e| format!("tar gagal dijalankan: {e}"))?;
+    if !out.status.success() || !piper_exe(dir).is_file() {
+        return Err(format!("Gagal mengekstrak Piper: {}", String::from_utf8_lossy(&out.stderr)));
+    }
+    let _ = std::fs::remove_file(zip);
+    Ok(())
 }
 
 /// Mengunduh model ke `dir` lewat file .part, memverifikasi ukuran dan SHA-256, lalu mengganti nama.
@@ -112,6 +163,9 @@ pub fn download(m: &ModelInfo, dir: &Path, cancel: Arc<AtomicBool>, mut on_progr
         return Err(format!("File {} rusak atau tidak cocok (ukuran {got}, hash {hash}). Coba unduh lagi.", m.file));
     }
     std::fs::rename(&part, &dest).map_err(|e| e.to_string())?;
+    if m.kind == "piper-engine" {
+        extract_engine(dir, m)?;
+    }
     on_progress(m.size, m.size);
     Ok(())
 }
@@ -225,7 +279,7 @@ mod tests {
     #[test]
     fn catalog_and_install_check() {
         assert!(model("whisper-small").unwrap().url.ends_with("ggml-small-q5_1.bin"));
-        assert!(MODELS.iter().all(|m| m.sha256.len() == 64 && m.url.starts_with("https://huggingface.co/")));
+        assert!(MODELS.iter().all(|m| m.sha256.len() == 64 && (m.url.starts_with("https://huggingface.co/") || m.url.starts_with("https://github.com/rhasspy/piper/"))));
         let dir = std::env::temp_dir().join("cutkit-ai-test");
         let _ = std::fs::create_dir_all(&dir);
         let vad = model("vad-silero").unwrap();

@@ -456,6 +456,25 @@ async fn transcribe(app: AppHandle, path: String, start: f64, duration: f64, mod
     result
 }
 
+/// TTS offline (Piper) ke `out_path` (WAV). Mengembalikan durasi dan waktu tiap kalimat.
+#[tauri::command]
+async fn tts(text: String, length_scale: f64, gap: f64, out_path: String, state: State<'_, AppState>) -> Result<cutkit_core::tts::TtsResult, String> {
+    let tools = state.tools()?;
+    let dir = state.models_dir();
+    for id in ["piper-engine", "piper-id", "piper-id-config"] {
+        let m = cutkit_core::ai::model(id).ok_or("Katalog TTS tidak lengkap.")?;
+        if !cutkit_core::ai::is_installed(&dir, m) {
+            return Err(format!("{} belum dipasang.", m.label));
+        }
+    }
+    let work = state.cache_dir.join("tts").join(format!("{}", std::process::id()));
+    blocking(move || {
+        let voice = dir.join(cutkit_core::ai::model("piper-id").unwrap().file);
+        cutkit_core::tts::synthesize(&cutkit_core::ai::piper_exe(&dir), &voice, &tools.ffmpeg, &tools.ffprobe, &text, length_scale, gap, &work, Path::new(&out_path))
+    })
+    .await
+}
+
 #[tauri::command]
 fn open_path(app: AppHandle, path: String) -> Result<(), String> {
     app.opener().open_path(path, None::<&str>).map_err(|e| e.to_string())
@@ -508,6 +527,7 @@ fn main() {
             ai_download,
             ai_cancel,
             transcribe,
+            tts,
             open_path,
             reveal_path
         ])

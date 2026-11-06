@@ -10,6 +10,7 @@ pub mod layout;
 pub mod model;
 pub mod probe;
 pub mod proxy;
+pub mod tts;
 
 pub use export::{build_job, build_plan, Encoder, ExportJob, ExportOptions, ExportPlan, ExportStep, Quality};
 pub use ffmpeg::{find_tools, Progress, Tools};

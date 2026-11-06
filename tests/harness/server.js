@@ -116,6 +116,23 @@ const commands = {
     }
     return words;
   },
+  tts: ({ text, lengthScale, gap, outPath }) => {
+    const piperDir = path.join(MODELS_DIR, "piper");
+    const sentences = text.split(/(?<=[.!?…])\s+|\n+/).map((s) => s.trim()).filter(Boolean);
+    const work = fs.mkdtempSync(path.join(CACHE, "tts-"));
+    const files = sentences.map((_, i) => path.join(work, `s${i}.wav`));
+    const jsonl = sentences.map((s, i) => JSON.stringify({ text: s, output_file: files[i] })).join("\n") + "\n";
+    execFileSync(path.join(piperDir, "piper.exe"), ["--model", path.join(MODELS_DIR, "id_ID-news_tts-medium.onnx"), "--json-input", "--length_scale", String(lengthScale)], { cwd: piperDir, input: jsonl });
+    const durs = files.map((f) => +execFileSync(FFPROBE, ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", f], { encoding: "utf8" }).trim());
+    execFileSync(FFMPEG, ["-y", "-loglevel", "error", "-f", "lavfi", "-i", "anullsrc=r=22050:cl=mono", "-t", String(gap), "-c:a", "pcm_s16le", path.join(work, "jeda.wav")]);
+    const list = files.flatMap((f, i) => (i ? [path.join(work, "jeda.wav"), f] : [f])).map((f) => `file '${f.replace(/\\/g, "/")}'`).join("\n");
+    fs.writeFileSync(path.join(work, "daftar.txt"), list);
+    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    execFileSync(FFMPEG, ["-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", path.join(work, "daftar.txt"), "-ar", "48000", "-ac", "1", "-c:a", "pcm_s16le", outPath]);
+    let t = 0;
+    const timed = sentences.map((s, i) => { if (i) t += gap; const r = { text: s, start: t, end: t + durs[i] }; t += durs[i]; return r; });
+    return { path: outPath, duration: t, sentences: timed };
+  },
   open_path: () => null,
   reveal_path: () => null,
 };

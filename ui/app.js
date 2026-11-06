@@ -816,6 +816,93 @@ function applyCaptionPreset(p, preset) {
   Object.assign(p.captions.style, st);
 }
 
+/* ---------- TTS offline (Piper) ---------- */
+
+const TTS_MODELS = ["piper-engine", "piper-id", "piper-id-config"];
+
+function stamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+async function renderVoicePanel() {
+  const panel = $("#voice-panel");
+  let info = null;
+  try { info = await invoke("ai_models"); } catch { /* */ }
+  const ready = info && TTS_MODELS.every((id) => info.models.find((m) => m.id === id)?.installed);
+  const whisper = info ? info.models.filter((m) => m.kind === "whisper" && m.installed) : [];
+  const need = info ? TTS_MODELS.map((id) => info.models.find((m) => m.id === id)).filter((m) => m && !m.installed) : [];
+  const text = el("textarea", { id: "tts-text", rows: 8, placeholder: "Tulis naskah di sini. Tiap kalimat diakhiri titik, tanda tanya, atau baris baru." }, state.ttsText || "");
+  text.addEventListener("input", () => { state.ttsText = text.value; });
+  const speed = el("input", { type: "range", min: 0.7, max: 1.4, step: 0.05, value: state.ttsSpeed || 1 });
+  const speedLabel = el("span", { class: "unit", style: "width:36px" }, `${(+speed.value).toFixed(2)}x`);
+  speed.addEventListener("input", () => { state.ttsSpeed = +speed.value; speedLabel.textContent = `${(+speed.value).toFixed(2)}x`; });
+  const gap = el("input", { type: "range", min: 0, max: 1.2, step: 0.05, value: state.ttsGap ?? 0.3 });
+  const gapLabel = el("span", { class: "unit", style: "width:36px" }, `${(+gap.value).toFixed(2)}s`);
+  gap.addEventListener("input", () => { state.ttsGap = +gap.value; gapLabel.textContent = `${(+gap.value).toFixed(2)}s`; });
+  const withCaption = el("input", { type: "checkbox", checked: true });
+  const align = el("input", { type: "checkbox", checked: whisper.length > 0, disabled: !whisper.length });
+  const go = el("button", { class: "btn primary" }, ready ? "🔊 Buat suara" : `⬇ Pasang TTS (${fmtBytes(need.reduce((s, m) => s + m.size, 0))}) lalu buat suara`);
+  go.addEventListener("click", () => runTts({ text: text.value, speed: +speed.value, gap: +gap.value, caption: withCaption.checked, align: align.checked && whisper.length ? whisper[whisper.length - 1].id : null }));
+  panel.replaceChildren(
+    el("p", { class: "hint" }, "Ubah naskah jadi suara narasi, offline dengan Piper. Hasilnya masuk ke track audio di posisi playhead."),
+    text,
+    field("Suara", el("select", {}, el("option", {}, "Indonesia · pria (news_tts)"))),
+    field("Kecepatan", el("div", { class: "ctl" }, speed, speedLabel)),
+    field("Jeda kalimat", el("div", { class: "ctl" }, gap, gapLabel)),
+    el("label", { class: "check" }, withCaption, "Buat caption kata-per-kata dari naskah"),
+    el("label", { class: "check", title: whisper.length ? "" : "Unduh model Whisper lewat Auto caption dulu" }, align, `Waktu tiap kata diselaraskan dengan Whisper${whisper.length ? "" : " (model belum ada)"}`),
+    go,
+    el("p", { class: "hint" }, "Untuk suara yang lebih natural, buat di VoiceKit (ElevenLabs) lalu impor; JSON alignment-nya langsung jadi caption."));
+}
+
+async function runTts(opts) {
+  if (!opts.text.trim()) return toast("Naskah masih kosong.", true);
+  const bar = el("div");
+  const status = el("p", { class: "hint" }, "Menyiapkan…");
+  openModal(el("h2", {}, "🔊 Membuat suara…"), el("div", { class: "progress indeterminate" }, bar), status,
+    el("div", { class: "modal-actions" }, el("button", { class: "btn", onclick: () => invoke("ai_cancel").catch(() => {}) }, "Batalkan")));
+  const say = (t, frac) => { status.textContent = t; if (frac != null) { bar.parentElement.classList.remove("indeterminate"); bar.style.width = `${(frac * 100).toFixed(1)}%`; } };
+  try {
+    await ensureModels(TTS_MODELS, say);
+    say("Membuat suara dengan Piper…");
+    let base;
+    if (state.path) base = dirName(state.path);
+    else { try { base = joinPath(await tauri.path.documentDir(), "CutKit"); } catch { base = "C:\\CutKit"; } }
+    const out = joinPath(joinPath(base, "suara"), `tts-${stamp()}.wav`);
+    const res = await invoke("tts", { text: opts.text, lengthScale: 1 / opts.speed, gap: opts.gap, outPath: out });
+    const [asset] = await importPaths([res.path]);
+    if (!asset) throw new Error("Hasil TTS tidak bisa diimpor.");
+    const at = preview.time;
+    const clip = addAssetToTimeline(asset, { overlay: true, time: at });
+    if (opts.caption && clip) {
+      let words;
+      if (opts.align) {
+        say("Menyelaraskan waktu kata dengan Whisper…");
+        const un = await tauri.event.listen("transcribe-progress", (ev) => say(`Menyelaraskan waktu kata · ${fmtTime(ev.payload.seconds).slice(0, 5)} / ${fmtTime(res.duration).slice(0, 5)}`, Math.min(1, ev.payload.seconds / res.duration)));
+        try {
+          const heard = await invoke("transcribe", { path: res.path, start: 0, duration: 0, model: opts.align, language: "id", useVad: false });
+          words = heard.length ? CAP.alignScript(opts.text, heard) : null;
+        } catch (e) { words = null; toast(`Penyelarasan dilewati: ${errMsg(e)}`, true); } finally { un(); }
+      }
+      if (!words) words = res.sentences.flatMap((s) => CAP.distribute(s.text, s.start, s.end));
+      const shifted = words.map((w) => ({ text: w.text, start: +(clip.start + w.start).toFixed(3), end: +(clip.start + w.end).toFixed(3) }));
+      const from = clip.start, to = TL.clipEnd(clip);
+      setCaptions((c) => {
+        c.words = c.words.filter((w) => w.end <= from || w.start >= to).concat(shifted).sort((a, b) => a.start - b.start);
+        c.enabled = true;
+      });
+    }
+    closeModal();
+    toast(`Suara ${res.duration.toFixed(1)} detik ditambahkan${opts.caption ? " beserta caption" : ""}. Tekan Spasi untuk mendengar.`);
+  } catch (e) {
+    openModal(el("h2", {}, String(errMsg(e)).includes("dibatalkan") ? "Dibatalkan" : "TTS gagal"),
+      el("pre", { style: "white-space:pre-wrap;font-size:12px;color:var(--danger);user-select:text" }, errMsg(e)),
+      el("div", { class: "modal-actions" }, el("button", { class: "btn primary", onclick: closeModal }, "Tutup")));
+  }
+}
+
 /* ---------- auto caption (Whisper offline) ---------- */
 
 const LANGS = [["id", "Indonesia"], ["en", "Inggris"], ["auto", "Deteksi otomatis"]];
@@ -1845,6 +1932,7 @@ function switchTab(tab) {
   document.querySelectorAll("#left-tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
   document.querySelectorAll(".panel.left .tab-body").forEach((s) => s.classList.toggle("hidden", s.dataset.tab !== tab));
   if (tab === "captions") renderCaptionsPanel();
+  if (tab === "voice") renderVoicePanel();
   if (tab === "library" && !state.lib.dir) {
     let last = null;
     try { last = JSON.parse(localStorage.getItem("cutkit.libdir") || "null"); } catch { /* */ }

@@ -9,7 +9,8 @@
     "build": "tauri build",
     "test": "node --test tests/ && cargo test -p cutkit-core",
     "test:js": "node --test tests/",
-    "icon": "tauri icon src-tauri/icons/icon.svg -o src-tauri/icons"
+    "icon": "tauri icon src-tauri/icons/icon.svg -o src-tauri/icons",
+    "test:ai": "cargo test -p cutkit-core --test ai_real -- --ignored --nocapture"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"
