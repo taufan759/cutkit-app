@@ -62,10 +62,11 @@ pub fn uninstall(path: &Path, name: &str) -> Result<bool, String> {
     Ok(removed)
 }
 
-/// Mencari node.exe di PATH dan lokasi pemasangan umum.
-pub fn find_node() -> Option<String> {
+/// Mencari node.exe: Node.js portabel CutKit (`<app_dir>\node`), lalu PATH dan lokasi pemasangan umum.
+pub fn find_node(app_dir: Option<&Path>) -> Option<String> {
     let exe = if cfg!(windows) { "node.exe" } else { "node" };
-    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+    let mut dirs: Vec<PathBuf> = app_dir.map(|d| vec![d.join("node")]).unwrap_or_default();
+    dirs.extend(std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default());
     if cfg!(windows) {
         for var in ["ProgramFiles", "ProgramFiles(x86)"] {
             if let Ok(d) = std::env::var(var) {

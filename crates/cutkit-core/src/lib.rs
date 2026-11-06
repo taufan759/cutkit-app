@@ -14,6 +14,7 @@ pub mod mcpcfg;
 pub mod model;
 pub mod probe;
 pub mod proxy;
+pub mod setup;
 pub mod tts;
 
 pub use export::{build_frame, build_job, build_plan, Encoder, ExportJob, ExportOptions, ExportPlan, ExportStep, Quality};
