@@ -530,7 +530,8 @@
     const wordsEnd = words && words.length ? Math.max(...words.map((w) => w.end)) : 0;
     const natural = visuals.map((v) => (v.kind === "video" && v.duration > 0 ? v.duration : STILL_DURATION));
     const naturalTotal = natural.reduce((s, d) => s + d, 0);
-    let total = voice ? voice.duration : Math.max(naturalTotal, wordsEnd);
+    // Caption yang lebih panjang dari voice over tidak boleh terpotong di akhir video.
+    let total = voice ? Math.max(voice.duration, wordsEnd) : Math.max(naturalTotal, wordsEnd);
     total = round(total);
     if (!(total > 0)) throw new Error("Durasi voice over tidak terbaca.");
 

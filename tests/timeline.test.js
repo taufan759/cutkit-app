@@ -228,3 +228,13 @@ test("autoAssemble tanpa voice: durasi dari gambar dan video", () => {
   assert.deepEqual(p.tracks[0].clips.map((c) => [c.start, c.duration]), [[0, 3], [3, 4]]);
   assert.throws(() => T.autoAssemble(p, {}), /minimal/);
 });
+
+test("autoAssemble: caption lebih panjang dari voice over tidak terpotong", () => {
+  const p = T.newProject();
+  const voice = { id: "vo", kind: "audio", duration: 1, has_audio: true };
+  const words = [{ text: "a", start: 0, end: 1 }, { text: "b", start: 3, end: 4 }];
+  const total = T.autoAssemble(p, { voice, visuals: [{ id: "i", kind: "image", width: 1, height: 1 }], words });
+  assert.equal(total, 4);
+  assert.equal(T.duration(p), 4);
+  assert.equal(p.tracks.find((t) => t.kind === "audio").clips[0].duration, 1, "voice over tetap sepanjang aslinya");
+});
