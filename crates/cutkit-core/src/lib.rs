@@ -2,5 +2,8 @@
 //! Tidak bergantung pada Tauri sehingga semua logika bisa diuji dengan `cargo test`.
 
 pub mod model;
+pub mod probe;
+pub mod proxy;
 
 pub use model::*;
+pub use probe::MediaInfo;
