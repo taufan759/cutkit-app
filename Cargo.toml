@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/cutkit-core", "src-tauri"]
+members = ["crates/cutkit-core", "crates/cutkit-cli", "src-tauri"]
 
 [workspace.package]
 version = "0.1.0"

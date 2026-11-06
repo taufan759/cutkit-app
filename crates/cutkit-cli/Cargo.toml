@@ -1,0 +1,14 @@
+[package]
+name = "cutkit-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CutKit dari baris perintah: probe, ekspor, auto caption, TTS, ketukan, hapus background (dipakai server MCP)"
+
+[[bin]]
+name = "cutkit-cli"
+path = "src/main.rs"
+
+[dependencies]
+cutkit-core = { path = "../cutkit-core" }
+serde_json = "1"

@@ -628,6 +628,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "cutkit-cli"
+version = "0.1.0"
+dependencies = [
+ "cutkit-core",
+ "serde_json",
+]
+
+[[package]]
 name = "cutkit-core"
 version = "0.1.0"
 dependencies = [
