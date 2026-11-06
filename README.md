@@ -4,17 +4,35 @@ Editor video desktop yang ringan untuk **Shorts 9:16 maupun video YouTube panjan
 
 Dibangun dengan [Tauri 2](https://tauri.app) (Rust + WebView2 bawaan Windows) dan UI HTML/CSS/JS polos tanpa framework, jadi aplikasinya kecil dan tetap enteng di laptop tanpa GPU khusus.
 
-## Mulai cepat (untuk pemula)
+## Pasang (untuk pemula)
 
-1. Pasang CutKit dari installer `CutKit_0.1.0_x64-setup.exe`, lalu buka dari Start Menu.
-2. Kalau muncul banner **ffmpeg belum terpasang**, klik **Pasang otomatis**. CutKit memasang ffmpeg lewat winget (tanpa terminal, tanpa hak admin) dan menampilkan prosesnya. Status bisa dicek kapan saja di menu **Proyek → Cek sistem & ffmpeg**.
-3. Di layar sambutan pilih salah satu:
+1. Unduh **`cutkit-setup-<versi>.exe`** dari halaman [Releases](https://github.com/taufan759/cutkit-app/releases/latest).
+2. Jalankan file itu. Kalau muncul layar biru **"Windows protected your PC"**, klik **More info → Run anyway**. Ini muncul karena installer belum ditandatangani sertifikat berbayar, bukan karena berbahaya. Kode lengkapnya ada di repo ini.
+3. Klik **Lanjut**, lalu centang apa saja yang mau disiapkan:
+
+   | Pilihan | Untuk apa | Ukuran |
+   |---|---|---|
+   | ffmpeg (dicentang) | Wajib untuk impor, preview, dan ekspor. Dilewati kalau sudah ada | ±100 MB |
+   | Auto caption (dicentang) | Model Whisper small untuk caption dari suara | 190 MB |
+   | Suara TTS | Naskah jadi suara Bahasa Indonesia (Piper) | ±85 MB |
+   | Hubungkan ke Claude | Muncul kalau Claude terpasang: Claude bisa mengedit lewat chat (MCP) | ±30 MB bila Node.js belum ada |
+   | Shortcut Desktop | Ikon CutKit di Desktop | - |
+
+4. Klik **Pasang**. Sebuah jendela hitam menampilkan proses persiapan (WebView2, ffmpeg, model AI) lengkap dengan persentasenya. Biarkan sampai selesai; kalau ada yang gagal, CutKit tetap bisa dipakai dan bagian itu bisa diulang dari dalam aplikasi.
+5. CutKit terbuka otomatis. Berikutnya buka saja **CutKit** dari Start Menu.
+
+Tidak butuh hak admin: CutKit dipasang per user di `%LOCALAPPDATA%\CutKit`. Semua unduhan memakai HTTPS dan model AI serta Node.js dicek checksum SHA-256-nya. Untuk menghapus: **Settings → Apps → CutKit → Uninstall**. Proyek dan video buatanmu tidak pernah dihapus; uninstaller menanyakan dulu apakah model AI ikut dihapus.
+
+## Mulai cepat
+
+1. Buka CutKit dari Start Menu. Kalau ffmpeg belum ada (misalnya pilihannya tidak dicentang saat memasang), muncul banner **ffmpeg belum terpasang**: klik **Pasang otomatis**. Status bisa dicek kapan saja di menu **Proyek → Cek sistem & ffmpeg**.
+2. Di layar sambutan pilih salah satu:
    - **🎬 Coba contoh**: membuat proyek latihan berisi narasi, gambar, klip, musik, judul, dan caption. Cocok untuk belajar; panduan 7 langkah langsung menjelaskan tiap bagian layar.
    - **⚡ Buat video cepat**: pilih satu folder berisi voice over, gambar/klip, dan caption, lalu timeline tersusun sendiri (Shorts atau YouTube 16:9).
    - **📐 Dari template**: susunan siap pakai (Fakta Shorts, Reaksi meme, Intro YouTube), tinggal pilih media pengganti.
    - **＋ Proyek kosong**: susun sendiri dari awal.
    - **🤖 Pakai lewat Claude**: hubungkan CutKit ke Claude, lalu minta Claude yang mengedit (lihat bagian MCP).
-4. Rapikan bila perlu (potong dengan S, hapus dengan Delete, geser gambar di preview), lalu klik **Ekspor**.
+3. Rapikan bila perlu (potong dengan S, hapus dengan Delete, geser gambar di preview), lalu klik **Ekspor**.
 
 ### Isi folder untuk Buat Shorts cepat
 
@@ -124,8 +142,10 @@ Cocok untuk pekerjaan berulang: caption untuk banyak video sekaligus, Shorts dar
 
 ### Cara menjalankan (sekali saja)
 
+Paling mudah: centang **Hubungkan ke Claude** saat memasang CutKit, lalu buka ulang Claude. Kalau terlewat:
+
 1. Pasang CutKit dari installer. Server MCP dan `cutkit-cli` sudah ikut di dalamnya.
-2. Pastikan [Node.js](https://nodejs.org) terpasang (server MCP berjalan dengan Node). Kalau belum: `winget install OpenJS.NodeJS.LTS`.
+2. Server MCP berjalan dengan Node.js. Kalau belum ada, dialog di langkah berikut punya tombol **Pasang Node.js** yang memasang versi portabel (±30 MB, dicek SHA-256) khusus untuk CutKit di `%LOCALAPPDATA%\CutKit\node`, tanpa mengubah PATH.
 3. Buka CutKit → **Proyek → 🤖 Hubungkan ke Claude (MCP)** (atau tombol **Pakai lewat Claude** di layar sambutan), lalu klik **Hubungkan** di aplikasi Claude yang kamu pakai:
    - **Claude Code**: juga berlaku untuk tab Code di aplikasi Claude.
    - **Claude Desktop**: untuk chat biasa.
@@ -258,8 +278,10 @@ CutKit mencari ffmpeg di PATH lalu di folder paket winget, jadi tidak perlu diat
 npm install
 npm run dev        # jalankan aplikasi
 npm test           # tes JS (node --test) + tes Rust, termasuk satu ekspor sungguhan
-npm run build      # installer NSIS di target/release/bundle/nsis/
+npm run build      # installer Inno Setup di installer/Output/cutkit-setup-<versi>.exe (butuh Inno Setup 6)
 ```
+
+Installer rilis dibangun otomatis oleh GitHub Actions (`.github/workflows/release.yml`) setiap ada tag `v*`, lengkap dengan file `.sha256`. Isinya `cutkit-app.exe`, `mcp\server.js` + `mcp\cutkit-cli.exe`, dan `ui\core` untuk server MCP. Setelah file disalin, installer menjalankan `cutkit-cli setup` yang memasang WebView2 (bila belum ada), ffmpeg, model AI pilihan, dan pendaftaran MCP. `npm run test:setup` menguji pemasangan Node.js portabel sungguhan (butuh internet).
 
 Ekspor proyek tanpa membuka aplikasi:
 
