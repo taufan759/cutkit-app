@@ -1604,16 +1604,24 @@ function renderInspector() {
         col.lut ? el("button", { class: "btn small ghost", onclick: () => commit((pp) => TL.updateClip(pp, c.id, { color: { lut: "" } })) }, "✕") : null))));
     const prev = TL.previousClip(f.track, c);
     const canTrans = prev && Math.abs(TL.clipEnd(prev) - (TL.transitionActive(c) ? c.transition.duration : 0) - c.start) < 0.02;
-    const TRANS_LABELS = [["none", "Tanpa"], ["fade", "Crossfade"], ["slide-left", "Geser ←"], ["slide-right", "Geser →"], ["slide-up", "Geser ↑"], ["slide-down", "Geser ↓"], ["push-left", "Dorong ←"], ["push-right", "Dorong →"]];
+    const TRANS_GROUPS = [
+      ["Dasar", [["none", "Tanpa"], ["fade", "Crossfade"], ["dip-black", "Lewat hitam"], ["dip-white", "Lewat putih"], ["blur", "Blur"], ["zoom", "Zoom"], ["spin", "Putar"]]],
+      ["Geser", [["slide-left", "Geser ←"], ["slide-right", "Geser →"], ["slide-up", "Geser ↑"], ["slide-down", "Geser ↓"], ["push-left", "Dorong ←"], ["push-right", "Dorong →"], ["whip-left", "Whip ←"], ["whip-right", "Whip →"]]],
+      ["Wipe & bentuk", [["wipe-left", "Wipe ←"], ["wipe-right", "Wipe →"], ["wipe-up", "Wipe ↑"], ["wipe-down", "Wipe ↓"], ["clock", "Jam"], ["iris", "Lingkaran"], ["dissolve", "Larut"]]],
+      ["Efek", [["pixelate", "Pikselasi"], ["glitch", "Glitch RGB"]]],
+    ];
+    const curKind = TL.transitionActive(c) ? c.transition.kind : "none";
     const durInput = el("input", { type: "number", min: 0.1, max: 3, step: 0.1, value: c.transition.duration });
     durInput.addEventListener("change", () => { if (TL.transitionActive(c)) commit((pp) => TL.setTransition(pp, c.id, c.transition.kind, +durInput.value)); });
     sections.push(el("section", {},
       el("h4", {}, "Transisi masuk"),
       canTrans
-        ? el("div", { class: "btn-row" }, TRANS_LABELS.map(([k, label]) => el("button", {
-          class: "btn small" + ((TL.transitionActive(c) ? c.transition.kind : "none") === k ? " primary" : ""),
-          onclick: () => commit((pp) => TL.setTransition(pp, c.id, k, +durInput.value || 0.5)),
-        }, label)))
+        ? el("div", {}, TRANS_GROUPS.map(([group, items]) => el("div", { class: "trans-group" },
+          el("div", { class: "hint" }, group),
+          el("div", { class: "btn-row" }, items.map(([k, label]) => el("button", {
+            class: "btn small" + (curKind === k ? " primary" : ""),
+            onclick: () => commit((pp) => TL.setTransition(pp, c.id, k, +durInput.value || 0.5)),
+          }, label))))))
         : el("p", { class: "hint" }, "Transisi bisa dipasang bila klip ini menempel langsung setelah klip lain di track yang sama."),
       canTrans ? field("Durasi", el("div", { class: "ctl" }, durInput, el("span", { class: "unit" }, "s"))) : null,
       canTrans ? el("p", { class: "hint" }, "Klip ini maju menumpuk klip sebelumnya sepanjang durasi transisi; suara ikut crossfade.") : null));

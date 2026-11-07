@@ -56,7 +56,7 @@ Gambar dibagi sepanjang voice over. Klip video yang lebih pendek dari jatahnya d
 | Auto caption | Suara (voice over atau semua klip satu track) jadi caption kata-per-kata dengan Whisper, offline setelah model diunduh sekali (base 60 MB, small 190 MB, medium 539 MB). Naskah opsional dipakai untuk membetulkan ejaan sambil mempertahankan waktu dari suara. Di i5-1345U model small sekitar 8x lebih cepat dari durasi audio |
 | TTS | Tab Suara: naskah jadi narasi Bahasa Indonesia offline dengan Piper, kecepatan dan jeda antar kalimat bisa diatur, langsung masuk timeline beserta caption yang waktunya diselaraskan dengan Whisper |
 | Ketukan musik | Deteksi tempo (BPM) dan ketukan, garis ketukan di klip musik, snap ke ketukan, tombol "Sinkronkan potongan", dan wizard yang mengganti gambar tepat di ketukan |
-| Transisi | Crossfade, geser 4 arah, dan dorong kiri/kanan antar klip di track yang sama; klip menumpuk sepanjang transisi seperti CapCut dan suara ikut crossfade |
+| Transisi | 23 jenis antar klip di track yang sama: crossfade, lewat hitam/putih, geser dan dorong 4 arah, whip, wipe 4 arah, jam, lingkaran (iris), larut (dissolve), blur, zoom, putar, pikselasi, dan glitch RGB. Klip menumpuk sepanjang transisi, suara ikut crossfade, dan preview memakai rumus yang sama dengan ekspor |
 | Efek | Getar, zoom kejut, kilat, hitam putih, vignette, blur, glitch RGB, negatif, sensor piksel, letterbox — sebagai klip di track Efek yang berlaku pada lapisan di bawahnya |
 | Filter warna | Kecerahan, kontras, saturasi, rona, suhu, file LUT `.cube`, dan preset (Hangat, Dingin, Cerah, Dramatis, Vintage, Pudar, Hitam putih) |
 | Keyframe | Animasi posisi, skala, rotasi, dan opacity di antara keyframe; slider dan geser di preview mengubah keyframe di playhead |

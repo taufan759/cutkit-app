@@ -106,28 +106,66 @@
   /** Easing smoothstep, sama dengan ekspresi ffmpeg di export.rs. */
   function ease(e) { e = Math.min(1, Math.max(0, e)); return e * e * (3 - 2 * e); }
 
-  /**
-   * Efek transisi di waktu t: { alpha, dx, dy } (dx/dy dalam piksel kanvas).
-   * `incoming` = transisi klip ini; `outgoing` = transisi klip berikutnya (untuk push).
-   */
-  function transitionAt(t, start, incoming, outgoing, outgoingStart, cw, ch) {
-    let alpha = 1, dx = 0, dy = 0;
-    if (incoming && incoming.kind !== "none") {
-      const e = ease((t - start) / Math.max(0.001, incoming.duration));
-      switch (incoming.kind) {
-        case "fade": alpha = e; break;
-        case "slide-left": case "push-left": dx = cw * (1 - e); break;
-        case "slide-right": case "push-right": dx = -cw * (1 - e); break;
-        case "slide-up": dy = ch * (1 - e); break;
-        case "slide-down": dy = -ch * (1 - e); break;
-      }
+  /* Transisi: konstanta dan rumus sama dengan crates/cutkit-core/src/transition.rs. */
+  const TRANSITION = { ZOOM_FROM: 1.25, SPIN_SCALE_FROM: 0.6, BLUR_MAX: 0.02, WHIP_BLUR_MAX: 0.03, PIXEL_MAX: 0.05, GLITCH_MAX: 0.025, MASK_DIV: 8 };
+  const isPush = (k) => k.startsWith("push-") || k.startsWith("whip-");
+  const isMask = (k) => k.startsWith("wipe-") || k === "clock" || k === "iris" || k === "dissolve";
+  const swapsAtHalf = (k) => k === "dip-black" || k === "dip-white" || k === "pixelate" || k === "glitch";
+  const fadesAlpha = (k) => k === "fade" || k === "blur" || k === "zoom" || k === "spin";
+  const kindEase = (k, p) => (k.startsWith("whip-") ? ease(ease(p)) : ease(p));
+
+  /** Apakah sel mask (X, Y) dari mask WxH sudah memperlihatkan klip baru pada kemajuan e (sama dengan mask_geq). */
+  function maskReveal(kind, e, X, Y, W, H) {
+    const x = X + 0.5, y = Y + 0.5;
+    switch (kind) {
+      case "wipe-left": return x >= W * (1 - e);
+      case "wipe-right": return x <= W * e;
+      case "wipe-up": return y >= H * (1 - e);
+      case "wipe-down": return y <= H * e;
+      case "clock": { let a = Math.atan2(x - W / 2, H / 2 - y); if (a < 0) a += 2 * Math.PI; return a < 2 * Math.PI * e; }
+      case "iris": return Math.hypot(x - W / 2, y - H / 2) <= e * Math.hypot(W / 2, H / 2);
+      default: { const n = Math.sin(X * 12.9898 + Y * 78.233) * 43758.5453; return n - Math.floor(n) < e; }
     }
-    if (outgoing && outgoing.kind.startsWith("push")) {
-      const e = ease((t - outgoingStart) / Math.max(0.001, outgoing.duration));
-      dx += outgoing.kind === "push-left" ? -cw * e : cw * e;
-    }
-    return { alpha, dx, dy };
   }
 
-  return { ease, transitionAt, place, hitTest, corners, rround, motionAt, motionActive, motionRect, MOTIONS, colorKey, hexToRgb };
+  function postAmount(kind, p, cw) {
+    const bump = Math.sin(Math.PI * Math.min(1, Math.max(0, p)));
+    const k = kind === "blur" ? TRANSITION.BLUR_MAX : kind.startsWith("whip-") ? TRANSITION.WHIP_BLUR_MAX : kind === "pixelate" ? TRANSITION.PIXEL_MAX : kind === "glitch" ? TRANSITION.GLITCH_MAX : 0;
+    return k * cw * bump;
+  }
+
+  /**
+   * Efek transisi di waktu t untuk satu klip: alpha, geser (dx/dy, piksel kanvas), skala dan putaran
+   * di sekitar pusat klip, terlihat atau belum, mask, efek komposisi (post), dan lapisan warna (dip).
+   * `incoming` = transisi klip ini; `outgoing` = transisi klip berikutnya (dorong/whip).
+   */
+  function transitionAt(t, start, incoming, outgoing, outgoingStart, cw, ch) {
+    const r = { alpha: 1, dx: 0, dy: 0, scale: 1, rot: 0, visible: true, mask: null, post: null, dip: null };
+    if (incoming && incoming.kind !== "none") {
+      const k = incoming.kind;
+      const p = Math.min(1, Math.max(0, (t - start) / Math.max(0.001, incoming.duration)));
+      const e = kindEase(k, p);
+      if (fadesAlpha(k)) r.alpha = p;
+      switch (k) {
+        case "slide-left": case "push-left": case "whip-left": r.dx = cw * (1 - e); break;
+        case "slide-right": case "push-right": case "whip-right": r.dx = -cw * (1 - e); break;
+        case "slide-up": r.dy = ch * (1 - e); break;
+        case "slide-down": r.dy = -ch * (1 - e); break;
+        case "zoom": r.scale = 1 + (TRANSITION.ZOOM_FROM - 1) * (1 - e); break;
+        case "spin": r.scale = TRANSITION.SPIN_SCALE_FROM + (1 - TRANSITION.SPIN_SCALE_FROM) * e; r.rot = (-Math.PI / 2) * (1 - e); break;
+      }
+      if (swapsAtHalf(k)) r.visible = p >= 0.5;
+      if (isMask(k) && p < 1) r.mask = { kind: k, e };
+      if (p > 0 && p < 1 && (k === "blur" || k.startsWith("whip-") || k === "pixelate" || k === "glitch")) r.post = { kind: k, amount: postAmount(k, p, cw) };
+      if ((k === "dip-black" || k === "dip-white") && p > 0 && p < 1) r.dip = { color: k === "dip-black" ? "#000000" : "#ffffff", alpha: p < 0.5 ? 2 * p : 2 - 2 * p };
+    }
+    if (outgoing && isPush(outgoing.kind)) {
+      const p = (t - outgoingStart) / Math.max(0.001, outgoing.duration);
+      const e = kindEase(outgoing.kind, Math.min(1, Math.max(0, p)));
+      r.dx += outgoing.kind.endsWith("-left") ? -cw * e : cw * e;
+    }
+    return r;
+  }
+
+  return { ease, transitionAt, maskReveal, postAmount, TRANSITION, place, hitTest, corners, rround, motionAt, motionActive, motionRect, MOTIONS, colorKey, hexToRgb };
 });

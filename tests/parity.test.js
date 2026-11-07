@@ -50,7 +50,8 @@ test("transisi preview memakai easing smoothstep yang sama dengan ekspor", () =>
   assert.equal(mid.dx, 540);
   const out = geometry.transitionAt(3.75, 0, null, { kind: "push-left", duration: 0.5 }, 3.5, 1080, 1920);
   assert.equal(out.dx, -540);
-  assert.ok(Math.abs(geometry.transitionAt(3.6, 3.5, { kind: "fade", duration: 0.4 }, null, 0, 1, 1).alpha - geometry.ease(0.25)) < 1e-9);
+  // fade memakai filter fade ffmpeg yang linear, jadi alpha preview juga linear
+  assert.ok(Math.abs(geometry.transitionAt(3.6, 3.5, { kind: "fade", duration: 0.4 }, null, 0, 1, 1).alpha - 0.25) < 1e-9);
 });
 
 test("matriks warna JS sama dengan rumus Rust", () => {

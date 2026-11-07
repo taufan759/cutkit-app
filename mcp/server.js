@@ -272,7 +272,7 @@ const TOOLS = [
   },
   {
     name: "cutkit_edit_clip",
-    description: "Mengubah klip: start (pindah), duration, speed, volume, fade_in, fade_out, transform {x,y,scale,rotation,opacity}, motion {kind,amount}, background, chroma {enabled,color,similarity,blend}, color {brightness,contrast,saturation,hue,temperature,lut}, transition {kind: fade/slide-left/slide-right/slide-up/slide-down/push-left/push-right/none, duration}, keyframes [{t,x,y,scale,rotation,opacity}], text, style (klip teks).",
+    description: "Mengubah klip: start (pindah), duration, speed, volume, fade_in, fade_out, transform {x,y,scale,rotation,opacity}, motion {kind,amount}, background, chroma {enabled,color,similarity,blend}, color {brightness,contrast,saturation,hue,temperature,lut}, transition {kind: none, fade, dip-black, dip-white, slide-left/right/up/down, push-left/right, whip-left/right, wipe-left/right/up/down, clock, iris, dissolve, blur, zoom, spin, pixelate, glitch; duration}, keyframes [{t,x,y,scale,rotation,opacity}], text, style (klip teks).",
     inputSchema: { type: "object", required: ["project", "clip_id"], properties: { project: PROJECT, clip_id: str("Id klip"), set: { type: "object", description: "Properti yang diubah" } } },
     run: async (a) => {
       const p = load(a.project);

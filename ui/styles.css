@@ -305,3 +305,6 @@ input[type=range] { accent-color: var(--accent); }
 .tour-bubble { position: fixed; width: 290px; background: var(--surface); border: 1px solid var(--accent); border-radius: 12px; padding: 12px 14px; box-shadow: 0 12px 40px rgba(0,0,0,.6); }
 .tour-bubble p { margin: 6px 0 10px; }
 .banner .btn { vertical-align: middle; }
+
+.trans-group { margin-bottom: 6px; }
+.trans-group > .hint { margin: 2px 0 4px; }

@@ -189,6 +189,82 @@
     return c;
   }
 
+  /* ---------- transisi: mask, efek komposisi, dan lapisan warna (sama dengan transition.rs) ---------- */
+
+  let maskCanvas = null, layerCanvas = null, smallCanvas = null;
+  /** Mask kecil (1/8 kanvas proyek) seperti geq di ekspor; putih = klip baru terlihat. */
+  function transitionMask(kind, e, pw, ph) {
+    const W = Math.max(2, Math.floor(pw / GEO.TRANSITION.MASK_DIV)), H = Math.max(2, Math.floor(ph / GEO.TRANSITION.MASK_DIV));
+    maskCanvas = maskCanvas || document.createElement("canvas");
+    if (maskCanvas.width !== W || maskCanvas.height !== H) { maskCanvas.width = W; maskCanvas.height = H; }
+    const c = maskCanvas.getContext("2d");
+    const img = c.createImageData(W, H);
+    for (let Y = 0; Y < H; Y++) for (let X = 0; X < W; X++) {
+      if (GEO.maskReveal(kind, e, X, Y, W, H)) img.data[(Y * W + X) * 4 + 3] = 255;
+    }
+    c.putImageData(img, 0, 0);
+    return maskCanvas;
+  }
+  function layerFor(canvas) {
+    layerCanvas = layerCanvas || document.createElement("canvas");
+    if (layerCanvas.width !== canvas.width || layerCanvas.height !== canvas.height) { layerCanvas.width = canvas.width; layerCanvas.height = canvas.height; }
+    const c = layerCanvas.getContext("2d");
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, canvas.width, canvas.height);
+    return c;
+  }
+  /** Efek komposisi transisi (blur, whip, pikselasi, glitch) lalu lapisan warna dip, pada isi kanvas saat ini. */
+  function applyTransitionPost(canvas, tr, k) {
+    const ctx = canvas.getContext("2d");
+    const W = canvas.width, H = canvas.height;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (tr.post && tr.post.amount > 0.05) {
+      const a = tr.post.amount * k;
+      if (tr.post.kind === "blur") {
+        const snap = snapshotCanvas(canvas);
+        ctx.filter = `blur(${a.toFixed(1)}px)`;
+        ctx.drawImage(snap, 0, 0);
+      } else if (tr.post.kind.startsWith("whip-")) {
+        // blur horizontal saja: rata-rata salinan bergeser di sepanjang +-2 sigma
+        const snap = snapshotCanvas(canvas);
+        const n = 9;
+        for (let i = 0; i < n; i++) {
+          ctx.globalAlpha = 1 / (i + 1);
+          ctx.drawImage(snap, (i / (n - 1) - 0.5) * 4 * a, 0);
+        }
+      } else if (tr.post.kind === "pixelate") {
+        const b = Math.max(1, Math.round(tr.post.amount)) * k;
+        smallCanvas = smallCanvas || document.createElement("canvas");
+        smallCanvas.width = Math.max(1, Math.round(W / b)); smallCanvas.height = Math.max(1, Math.round(H / b));
+        const sc = smallCanvas.getContext("2d");
+        sc.imageSmoothingEnabled = true;
+        sc.drawImage(canvas, 0, 0, smallCanvas.width, smallCanvas.height);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(smallCanvas, 0, 0, W, H);
+        ctx.imageSmoothingEnabled = true;
+      } else if (tr.post.kind === "glitch") {
+        const sh = Math.round(Math.min(255, Math.round(tr.post.amount)) * k);
+        if (sh > 0) {
+          const src = ctx.getImageData(0, 0, W, H), out = ctx.createImageData(W, H);
+          const d = src.data, o = out.data;
+          for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+            const i = (y * W + x) * 4;
+            const xr = (((x - sh) % W) + W) % W, xb = (x + sh) % W;
+            o[i] = d[(y * W + xr) * 4]; o[i + 1] = d[i + 1]; o[i + 2] = d[(y * W + xb) * 4 + 2]; o[i + 3] = 255;
+          }
+          ctx.putImageData(out, 0, 0);
+        }
+      }
+    }
+    if (tr.dip && tr.dip.alpha > 0) {
+      ctx.filter = "none"; ctx.globalAlpha = Math.min(1, tr.dip.alpha);
+      ctx.fillStyle = tr.dip.color;
+      ctx.fillRect(0, 0, W, H);
+    }
+    ctx.restore();
+  }
+
   /** Menerapkan efek pada isi kanvas saat ini (lapisan di bawah efek). k = piksel kanvas per piksel proyek. */
   function applyEffect(canvas, fx, t, start, end, k) {
     const ctx = canvas.getContext("2d");
@@ -555,6 +631,11 @@
           const tf = TL.transformAt(clip, t - clip.start);
           const pl = GEO.place(p.canvas.width, p.canvas.height, asset.width, asset.height, clip.fit, tf);
           boxes.push({ id: clip.id, pl, kind: clip.kind });
+          const finish = () => { if (tr.post || tr.dip) applyTransitionPost(this.canvas, tr, k); };
+          if (!tr.visible) { finish(); continue; }
+          const mainCtx = ctx;
+          const ctxT = tr.mask ? layerFor(this.canvas) : ctx;
+          if (tr.mask) ctxT.setTransform(k, 0, 0, k, 0, 0);
           let source = null;
           if (asset.missing) source = null;
           else if (clip.kind === "image") {
@@ -569,37 +650,52 @@
             const sw = source.videoWidth || source.naturalWidth || 1;
             const sh = source.videoHeight || source.naturalHeight || 1;
             const r = Math.max(4, Math.round(Math.min(p.canvas.width, p.canvas.height) / 27));
-            ctx.save();
-            ctx.globalAlpha = tr.alpha;
-            ctx.filter = `${colorFilter(clip)} blur(${(r * 0.8 * k).toFixed(1)}px)`.trim();
+            ctxT.save();
+            ctxT.globalAlpha = tr.alpha;
+            ctxT.filter = `${colorFilter(clip)} blur(${(r * 0.8 * k).toFixed(1)}px)`.trim();
             // Digambar lebih besar 3r di tiap sisi: blur canvas mengambil piksel transparan di luar tepi,
             // sedangkan boxblur ffmpeg menjepit tepi; tanpa ini pinggiran preview menggelap.
             const pad = r * 3;
             const s2 = Math.max((p.canvas.width + pad * 2) / sw, (p.canvas.height + pad * 2) / sh);
-            ctx.beginPath();
-            ctx.rect(0, 0, p.canvas.width, p.canvas.height);
-            ctx.clip();
-            ctx.drawImage(source, (p.canvas.width - sw * s2) / 2, (p.canvas.height - sh * s2) / 2, sw * s2, sh * s2);
-            ctx.restore();
+            ctxT.beginPath();
+            ctxT.rect(0, 0, p.canvas.width, p.canvas.height);
+            ctxT.clip();
+            ctxT.drawImage(source, (p.canvas.width - sw * s2) / 2, (p.canvas.height - sh * s2) / 2, sw * s2, sh * s2);
+            ctxT.restore();
           }
           let colored = false;
           if (source) ({ source, colored } = this._processed(clip, source, pl, k));
-          ctx.save();
-          if (!colored) { const cf = colorFilter(clip); if (cf) ctx.filter = cf; }
-          ctx.globalAlpha = Math.max(0, Math.min(1, tf.opacity)) * tr.alpha;
-          ctx.translate(pl.cx + tr.dx, pl.cy + tr.dy);
-          ctx.rotate(pl.rad);
+          ctxT.save();
+          if (!colored) { const cf = colorFilter(clip); if (cf) ctxT.filter = cf; }
+          ctxT.globalAlpha = Math.max(0, Math.min(1, tf.opacity)) * tr.alpha;
+          ctxT.translate(pl.cx + tr.dx, pl.cy + tr.dy);
+          ctxT.rotate(pl.rad + tr.rot);
+          if (tr.scale !== 1) ctxT.scale(tr.scale, tr.scale);
           if (source && GEO.motionActive(clip.motion)) {
             const sw = source.videoWidth || source.naturalWidth || source.width || pl.w;
             const sh = source.videoHeight || source.naturalHeight || source.height || pl.h;
             const [sx, sy, rw, rh] = GEO.motionRect(clip.motion, (t - clip.start) / clip.duration, sw, sh);
-            ctx.drawImage(source, sx, sy, rw, rh, -pl.w / 2, -pl.h / 2, pl.w, pl.h);
-          } else if (source) ctx.drawImage(source, -pl.w / 2, -pl.h / 2, pl.w, pl.h);
+            ctxT.drawImage(source, sx, sy, rw, rh, -pl.w / 2, -pl.h / 2, pl.w, pl.h);
+          } else if (source) ctxT.drawImage(source, -pl.w / 2, -pl.h / 2, pl.w, pl.h);
           else {
-            ctx.fillStyle = asset.missing ? "rgba(200,40,40,.35)" : "rgba(255,255,255,.06)";
-            ctx.fillRect(-pl.w / 2, -pl.h / 2, pl.w, pl.h);
+            ctxT.fillStyle = asset.missing ? "rgba(200,40,40,.35)" : "rgba(255,255,255,.06)";
+            ctxT.fillRect(-pl.w / 2, -pl.h / 2, pl.w, pl.h);
           }
-          ctx.restore();
+          ctxT.restore();
+          if (tr.mask) {
+            // klip baru hanya terlihat di bagian mask yang sudah terbuka
+            ctxT.save();
+            ctxT.setTransform(1, 0, 0, 1, 0, 0);
+            ctxT.globalCompositeOperation = "destination-in";
+            ctxT.imageSmoothingEnabled = true;
+            ctxT.drawImage(transitionMask(tr.mask.kind, tr.mask.e, p.canvas.width, p.canvas.height), 0, 0, this.canvas.width, this.canvas.height);
+            ctxT.restore();
+            mainCtx.save();
+            mainCtx.setTransform(1, 0, 0, 1, 0, 0);
+            mainCtx.drawImage(layerCanvas, 0, 0);
+            mainCtx.restore();
+          }
+          finish();
         }
       });
 

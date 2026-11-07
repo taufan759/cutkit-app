@@ -198,7 +198,9 @@
     });
   }
 
-  const TRANSITIONS = ["none", "fade", "slide-left", "slide-right", "slide-up", "slide-down", "push-left", "push-right"];
+  // Sama dengan transition::KINDS di crates/cutkit-core/src/transition.rs.
+  const TRANSITIONS = ["none", "fade", "dip-black", "dip-white", "slide-left", "slide-right", "slide-up", "slide-down", "push-left", "push-right",
+    "whip-left", "whip-right", "wipe-left", "wipe-right", "wipe-up", "wipe-down", "clock", "iris", "dissolve", "blur", "zoom", "spin", "pixelate", "glitch"];
   function transitionActive(c) { return !!c.transition && c.transition.kind !== "none" && TRANSITIONS.includes(c.transition.kind) && c.transition.duration > 0; }
 
   /** Klip tepat sebelum `clip` di track (berdasarkan waktu mulai). */
