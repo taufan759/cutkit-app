@@ -27,7 +27,7 @@ jobs:
       - name: Test
         run: |
           cargo build --release -p cutkit-cli --locked
-          node --test tests/
+          node --test "tests/*.test.js"
           cargo test -p cutkit-core --release --locked
 
       - name: Inno Setup
@@ -92,7 +92,7 @@ jobs:
         run: |
           ffmpeg -version | head -1
           cargo build --release -p cutkit-cli --locked
-          node --test tests/
+          node --test "tests/*.test.js"
           cargo test -p cutkit-core --release --locked
 
       - name: Paket .deb dan .AppImage
@@ -116,7 +116,7 @@ jobs:
           files: dist/*
 
   macos:
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -139,7 +139,7 @@ jobs:
         run: |
           ffmpeg -version | head -1
           cargo build --release -p cutkit-cli --locked
-          node --test tests/
+          node --test "tests/*.test.js"
           cargo test -p cutkit-core --release --locked
 
       - name: Paket .dmg (universal)

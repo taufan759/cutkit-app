@@ -7,8 +7,8 @@
   "scripts": {
     "dev": "cargo build --release -p cutkit-cli && tauri dev",
     "build": "powershell -ExecutionPolicy Bypass -File installer/build.ps1",
-    "test": "node --test tests/ && cargo test -p cutkit-core",
-    "test:js": "node --test tests/",
+    "test": "node --test \"tests/*.test.js\" && cargo test -p cutkit-core",
+    "test:js": "node --test \"tests/*.test.js\"",
     "icon": "tauri icon src-tauri/icons/icon.svg -o src-tauri/icons",
     "test:ai": "cargo test -p cutkit-core --test ai_real -- --ignored --nocapture",
     "build:cli": "cargo build --release -p cutkit-cli",
