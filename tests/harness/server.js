@@ -78,7 +78,7 @@ const commands = {
   path_exists: ({ path: p }) => fs.existsSync(p),
   export_start: ({ project, options }) => { lastExport = { project, options }; return null; },
   export_cancel: () => null,
-  system_info: () => ({ tools: commands.tools_info(), winget: true, cache_dir: CACHE, cache_bytes: 12345678 }),
+  system_info: () => ({ tools: commands.tools_info(), winget: true, installer: "winget", install_hint: "winget install Gyan.FFmpeg", os: "windows", whisper: true, cache_dir: CACHE, cache_bytes: 12345678 }),
   clear_cache: () => 12345678,
   install_ffmpeg: () => commands.tools_info(),
   // Memakai media yang dibuat tes Rust `demo_media_is_generated` (cargo test).

@@ -510,10 +510,19 @@ const TOOLS = [
     description: "Membuka proyek di aplikasi CutKit supaya pengguna bisa melihat, memutar, dan merapikan sendiri hasil susunan.",
     inputSchema: { type: "object", required: ["project"], properties: { project: PROJECT } },
     run: async (a) => {
-      const exe = [path.join(ROOT, "cutkit-app.exe"), path.join(process.env.LOCALAPPDATA || "", "CutKit", "cutkit-app.exe"), path.join(ROOT, "target", "release", "cutkit-app.exe")].find((p) => fs.existsSync(p));
-      if (!exe) throw new Error("Aplikasi CutKit tidak ditemukan. Pasang dari installer CutKit_x64-setup.exe.");
       const file = path.resolve(a.project);
       if (!fs.existsSync(file)) throw new Error(`Proyek tidak ada: ${file}`);
+      if (process.platform === "darwin") {
+        // aplikasi .app dibuka lewat Launch Services, berkas proyek diteruskan sebagai argumen
+        spawn("open", ["-a", "CutKit", "--args", file], { detached: true, stdio: "ignore" }).unref();
+        return { opened: file, app: "CutKit.app" };
+      }
+      const name = process.platform === "win32" ? "cutkit-app.exe" : "cutkit-app";
+      const candidates = [path.join(ROOT, name), path.join(ROOT, "target", "release", name)];
+      if (process.platform === "win32") candidates.splice(1, 0, path.join(process.env.LOCALAPPDATA || "", "CutKit", name));
+      else candidates.push("/usr/bin/cutkit-app", path.join(os.homedir(), ".local", "bin", "cutkit-app"));
+      const exe = candidates.find((p) => fs.existsSync(p));
+      if (!exe) throw new Error("Aplikasi CutKit tidak ditemukan. Pasang dari halaman rilis github.com/taufan759/cutkit-app/releases.");
       spawn(exe, [file], { detached: true, stdio: "ignore", windowsHide: false }).unref();
       return { opened: file, app: exe };
     },
@@ -566,13 +575,21 @@ const PROMPTS = [
   },
 ];
 
+/** Folder pengaturan CutKit (sama dengan paths::config_dir di Rust dan app_config_dir Tauri). */
+function configDir() {
+  const id = "io.github.taufan759.cutkit";
+  if (process.platform === "win32") return path.join(process.env.APPDATA || os.homedir(), id);
+  if (process.platform === "darwin") return path.join(os.homedir(), "Library", "Application Support", id);
+  return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), id);
+}
+
 function listTemplates() {
   const out = [];
   const dir = path.join(ROOT, "ui", "templates");
   try {
     for (const it of JSON.parse(fs.readFileSync(path.join(dir, "index.json"), "utf8"))) out.push({ name: it.name, file: path.join(dir, it.file), builtin: true, description: it.description, t: JSON.parse(fs.readFileSync(path.join(dir, it.file), "utf8")) });
   } catch { /* */ }
-  const user = path.join(process.env.APPDATA || "", "io.github.taufan759.cutkit", "templates");
+  const user = path.join(configDir(), "templates");
   try {
     for (const f of fs.readdirSync(user).filter((x) => x.endsWith(".json"))) {
       const t = JSON.parse(fs.readFileSync(path.join(user, f), "utf8"));

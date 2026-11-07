@@ -71,7 +71,7 @@ impl AppState {
         if guard.is_none() {
             *guard = ffmpeg::find_tools(None);
         }
-        guard.clone().ok_or_else(|| "ffmpeg tidak ditemukan. Pasang dengan: winget install Gyan.FFmpeg, lalu buka ulang CutKit.".to_string())
+        guard.clone().ok_or_else(|| format!("ffmpeg tidak ditemukan. Pasang dengan: {}, lalu buka ulang CutKit.", ffmpeg::install_hint()))
     }
 }
 
@@ -376,6 +376,12 @@ fn export_preview_command(project: Project, options: ExportOptions) -> Result<se
 struct SystemInfo {
     tools: Option<Tools>,
     winget: bool,
+    /// Cara pasang ffmpeg otomatis di OS ini (winget, Homebrew, unduhan BtbN), atau None.
+    installer: Option<String>,
+    install_hint: String,
+    os: String,
+    /// ffmpeg punya filter whisper (auto caption).
+    whisper: bool,
     cache_dir: String,
     cache_bytes: u64,
 }
@@ -390,7 +396,17 @@ async fn system_info(state: State<'_, AppState>) -> Result<SystemInfo, String> {
             t.has_qsv = ffmpeg::check_qsv(&t.ffmpeg);
             t
         });
-        Ok(SystemInfo { tools, winget: ffmpeg::has_winget(), cache_bytes: ffmpeg::dir_size(&cache), cache_dir: cache.to_string_lossy().to_string() })
+        let whisper = tools.as_ref().map(|t| ffmpeg::has_whisper(&t.ffmpeg)).unwrap_or(false);
+        Ok(SystemInfo {
+            tools,
+            winget: ffmpeg::has_winget(),
+            installer: ffmpeg::installer_name().map(String::from),
+            install_hint: ffmpeg::install_hint().into(),
+            os: std::env::consts::OS.into(),
+            whisper,
+            cache_bytes: ffmpeg::dir_size(&cache),
+            cache_dir: cache.to_string_lossy().to_string(),
+        })
     })
     .await
 }
@@ -405,7 +421,7 @@ fn clear_cache(state: State<AppState>) -> Result<u64, String> {
     Ok(before.saturating_sub(ffmpeg::dir_size(&state.cache_dir)))
 }
 
-/// Memasang ffmpeg lewat winget; log dikirim lewat event `setup-log`.
+/// Memasang ffmpeg (winget, Homebrew, atau unduhan BtbN di Linux); log dikirim lewat event `setup-log`.
 #[tauri::command]
 async fn install_ffmpeg(app: AppHandle, state: State<'_, AppState>) -> Result<Tools, String> {
     let app2 = app.clone();
@@ -651,7 +667,8 @@ fn mcp_server_path(app: &AppHandle) -> Option<PathBuf> {
 
 fn mcp_cli_path(server: &Path) -> Option<PathBuf> {
     let dir = server.parent()?;
-    [dir.join("cutkit-cli.exe"), dir.join("..").join("target").join("release").join("cutkit-cli.exe")].into_iter().find(|p| p.is_file())
+    let exe = cutkit_core::paths::exe("cutkit-cli");
+    [dir.join(&exe), dir.join("..").join("target").join("release").join(&exe)].into_iter().find(|p| p.is_file())
 }
 
 /// Folder program CutKit (tempat cutkit-app.exe); Node.js portabel dipasang di `node\` di dalamnya.
@@ -663,7 +680,8 @@ fn app_dir() -> Option<PathBuf> {
 #[tauri::command]
 async fn mcp_install_node(app: AppHandle) -> Result<String, String> {
     let dir = app_dir().ok_or("Folder program tidak diketahui")?;
-    blocking(move || cutkit_core::setup::install_node(&dir, |got, total| { let _ = app.emit("node-progress", (got, total)); })).await
+    let home = cutkit_core::setup::node_home(Some(&dir));
+    blocking(move || cutkit_core::setup::install_node(&home, |got, total| { let _ = app.emit("node-progress", (got, total)); })).await
 }
 
 /// Path dengan garis miring biasa agar mudah dibaca di JSON dan perintah.

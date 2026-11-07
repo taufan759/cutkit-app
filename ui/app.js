@@ -2031,7 +2031,11 @@ async function systemDialog(autoInstall = false) {
   body.replaceChildren(
     item(!!t, t ? `ffmpeg ${t.version}` : "ffmpeg belum terpasang", t ? t.ffmpeg : "Dibutuhkan untuk impor, preview format khusus, dan ekspor."),
     item(t ? (t.has_qsv ? true : null) : null, t && t.has_qsv ? "Intel Quick Sync tersedia" : "Intel Quick Sync tidak terdeteksi", t && t.has_qsv ? "Pilih encoder Quick Sync saat ekspor agar lebih cepat dan hemat baterai." : "Ekspor memakai CPU (libx264); hasil tetap sama bagusnya."),
-    item(info.winget ? true : null, info.winget ? "winget tersedia" : "winget tidak ditemukan", info.winget ? "Dipakai untuk memasang dan memperbarui ffmpeg." : "Pasang \"App Installer\" dari Microsoft Store bila ingin memasang ffmpeg otomatis."),
+    item(info.installer ? true : null, info.installer ? `Pemasang otomatis: ${info.installer}` : "Pemasang otomatis tidak tersedia",
+      info.installer ? "Dipakai untuk memasang ffmpeg tanpa repot." : info.os === "macos" ? "Pasang Homebrew dari brew.sh, atau jalankan sendiri: " + info.install_hint
+        : info.os === "windows" ? "Pasang \"App Installer\" dari Microsoft Store, atau jalankan sendiri: " + info.install_hint : "Jalankan sendiri: " + info.install_hint),
+    t ? item(info.whisper ? true : null, info.whisper ? "Auto caption siap (filter whisper ada)" : "ffmpeg ini belum punya filter whisper",
+      info.whisper ? "Caption dari suara berjalan offline." : "Auto caption butuh ffmpeg 8 atau lebih baru yang dibangun dengan whisper.cpp (Windows: winget Gyan.FFmpeg). Fitur lain tetap jalan.") : null,
     el("div", { class: "check-row" }, el("span", { class: "mark" }, "🗂"), el("div", {}, el("b", {}, `Cache preview ${fmtBytes(info.cache_bytes)}`), el("div", { class: "hint" }, info.cache_dir)), clearBtn));
   let ai = null;
   try { ai = await invoke("ai_models"); } catch { /* */ }
@@ -2047,15 +2051,15 @@ async function systemDialog(autoInstall = false) {
     body.append(el("div", { class: "check-row" }, el("span", { class: "mark" }, "🧠"),
       el("div", {}, el("b", {}, `Model AI: ${installed.length ? installed.map((m) => m.label).join(", ") : "belum ada"}`), el("div", { class: "hint" }, ai.models_dir)), changeDir));
   }
-  if (!t && info.winget) actions.prepend(install);
+  if (!t && info.installer) actions.prepend(install);
   install.addEventListener("click", async () => {
     install.disabled = true;
     install.textContent = "Memasang… (bisa beberapa menit)";
     log.classList.remove("hidden");
-    log.textContent = "winget install Gyan.FFmpeg\n";
+    log.textContent = `${info.install_hint}\n`;
     const un = await tauri.event.listen("setup-log", (ev) => {
       const lines = log.textContent.split("\n");
-      // Baris progres winget (persen/bar) menimpa baris terakhir, seperti di terminal.
+      // Baris progres (persen/bar) menimpa baris terakhir, seperti di terminal.
       if (/[█▒]|\d+%|MB \/|KB \//.test(ev.payload) && /[█▒]|\d+%|MB \/|KB \//.test(lines[lines.length - 1])) lines[lines.length - 1] = ev.payload;
       else lines.push(ev.payload);
       log.textContent = lines.slice(-60).join("\n");
@@ -2072,11 +2076,11 @@ async function systemDialog(autoInstall = false) {
       install.textContent = "Coba lagi";
     } finally { un(); }
   });
-  if (autoInstall && !t && info.winget) install.click();
+  if (autoInstall && !t && info.installer) install.click();
 }
 
 const TOUR = [
-  { sel: ".panel.left", text: "Media: impor video, gambar, dan audio di sini (atau seret file dari Explorer). Klik ＋ untuk menaruh ke timeline." },
+  { sel: ".panel.left", text: "Media: impor video, gambar, dan audio di sini (atau seret file dari folder). Klik ＋ untuk menaruh ke timeline." },
   { sel: "#left-tabs [data-tab=library]", text: "Pustaka: meme dan sound effect dari foldermu. Seret ke timeline atau ke preview." },
   { sel: "#left-tabs [data-tab=captions]", text: "Caption: impor .srt atau JSON kata dari VoiceKit, atau ketik naskah. Kata yang sedang diucapkan disorot." },
   { sel: ".preview-area", text: "Preview: klik gambar/teks untuk memilih, seret untuk memindah, tarik pojok untuk memperbesar, bulatan atas untuk memutar." },
@@ -2547,9 +2551,11 @@ async function init() {
     state.tools = await invoke("tools_info");
   } catch (e) {
     const b = $("#ffmpeg-banner");
+    let hint = "winget install Gyan.FFmpeg";
+    try { hint = (await invoke("system_info")).install_hint || hint; } catch { /* */ }
     b.replaceChildren(el("b", {}, "ffmpeg belum terpasang. "), "Impor dan ekspor butuh ffmpeg. ",
       el("button", { class: "btn small primary", onclick: () => systemDialog(true) }, "Pasang otomatis"), " ",
-      el("span", { class: "hint" }, "atau lewat terminal: "), el("code", {}, "winget install Gyan.FFmpeg"));
+      el("span", { class: "hint" }, "atau lewat terminal: "), el("code", {}, hint));
     b.classList.remove("hidden");
   }
 }
