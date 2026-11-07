@@ -25,7 +25,7 @@ const HELP: &str = "cutkit-cli <perintah> [argumen]
                                          persiapan untuk pemula (dijalankan installer)
   uninstall [--delete-models]            lepas MCP dari Claude dan hapus cache (dijalankan uninstaller)
 
-Opsi umum: --models <folder> (bawaan: folder model aplikasi CutKit)";
+Opsi umum: --models <folder> (bawaan: folder model aplikasi CutKit, sama di Windows, macOS, dan Linux)";
 
 struct Args {
     pos: Vec<String>,
@@ -73,18 +73,7 @@ fn models_dir(args: &Args) -> PathBuf {
     if let Ok(d) = std::env::var("CUTKIT_MODELS") {
         return PathBuf::from(d);
     }
-    if let Ok(appdata) = std::env::var("APPDATA") {
-        let settings = Path::new(&appdata).join("io.github.taufan759.cutkit").join("settings.json");
-        if let Ok(text) = std::fs::read_to_string(settings) {
-            if let Ok(v) = serde_json::from_str::<Value>(&text) {
-                if let Some(d) = v["models_dir"].as_str().filter(|d| !d.trim().is_empty()) {
-                    return PathBuf::from(d);
-                }
-            }
-        }
-    }
-    let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().to_string());
-    Path::new(&base).join("io.github.taufan759.cutkit").join("models")
+    cutkit_core::paths::models_dir()
 }
 
 fn progress(pct: f64, what: &str) {
@@ -101,7 +90,7 @@ fn need_model<'a>(dir: &Path, id: &str) -> Result<&'a ai::ModelInfo, String> {
 
 fn run(args: Args) -> Result<Value, String> {
     let cmd = args.pos.first().cloned().unwrap_or_default();
-    let tools = || find_tools(None).ok_or_else(|| "ffmpeg tidak ditemukan. Pasang: winget install Gyan.FFmpeg".to_string());
+    let tools = || find_tools(None).ok_or_else(|| format!("ffmpeg tidak ditemukan. Pasang: {}", ffmpeg::install_hint()));
     let dir = models_dir(&args);
     match cmd.as_str() {
         "info" => {
@@ -300,7 +289,7 @@ fn setup(args: &Args, models: &Path) -> Result<Value, String> {
                 if let Some(t) = find_tools(None) {
                     println!("     Sudah ada: {} ({})", t.ffmpeg, t.version);
                 } else {
-                    println!("     Memasang ffmpeg lewat winget. Bisa beberapa menit tergantung internet...");
+                    println!("     Memasang ffmpeg lewat {}. Bisa beberapa menit tergantung internet...", ffmpeg::installer_name().unwrap_or("pemasang sistem"));
                     match ffmpeg::install_ffmpeg(|line| println!("     {line}")) {
                         Ok(()) => {
                             println!("     ffmpeg terpasang.");
@@ -393,9 +382,10 @@ fn connect_claude(app: &Path) -> Result<Vec<String>, String> {
         Some(n) => n,
         None => {
             println!("     Memasang Node.js portabel untuk server MCP (±30 MB, dicek SHA-256)...");
-            let v = cutkit_core::setup::install_node(app, bar)?;
+            let home = cutkit_core::setup::node_home(Some(app));
+            let v = cutkit_core::setup::install_node(&home, bar)?;
             println!("\n     Node.js {v} siap.");
-            cutkit_core::setup::bundled_node(app).to_string_lossy().to_string()
+            cutkit_core::setup::bundled_node(&home).to_string_lossy().to_string()
         }
     };
     let server_s = server.to_string_lossy().replace('\\', "/");
@@ -420,7 +410,7 @@ fn uninstall(args: &Args, models: &Path) -> Result<Value, String> {
             removed.push(name);
         }
     }
-    let data = std::env::var("LOCALAPPDATA").map(|d| Path::new(&d).join("io.github.taufan759.cutkit")).ok();
+    let data = Some(cutkit_core::paths::data_dir());
     if let Some(d) = &data {
         for sub in ["proxy", "thumbs", "wave", "tts", "export", "EBWebView"] {
             let p = d.join(sub);

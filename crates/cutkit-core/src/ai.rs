@@ -22,6 +22,23 @@ pub struct ModelInfo {
 }
 
 /// Ukuran dan hash dari API Hugging Face (ggerganov/whisper.cpp, ggml-org/whisper-vad).
+/// Mesin Piper rilis resmi 2023.11.14-2 untuk OS dan arsitektur ini (ukuran dan SHA-256 dari rilisnya).
+const fn piper_engine(file: &'static str, url: &'static str, sha256: &'static str, size: u64) -> ModelInfo {
+    ModelInfo { id: "piper-engine", kind: "piper-engine", label: "Mesin TTS Piper", note: "20-26 MB. Program TTS offline (rhasspy/piper 2023.11.14-2, MIT).", file, url, sha256, size }
+}
+#[cfg(windows)]
+const PIPER_ENGINE: ModelInfo = piper_engine("piper_windows_amd64.zip", "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip", "f3c58906402b24f3a96d92145f58acba6d86c9b5db896d207f78dc80811efcea", 22_477_236);
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+const PIPER_ENGINE: ModelInfo = piper_engine("piper_linux_aarch64.tar.gz", "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_aarch64.tar.gz", "fea0fd2d87c54dbc7078d0f878289f404bd4d6eea6e7444a77835d1537ab88eb", 26_004_717);
+#[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
+const PIPER_ENGINE: ModelInfo = piper_engine("piper_linux_x86_64.tar.gz", "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_x86_64.tar.gz", "a50cb45f355b7af1f6d758c1b360717877ba0a398cc8cbe6d2a7a3a26e225992", 26_460_462);
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+const PIPER_ENGINE: ModelInfo = piper_engine("piper_macos_aarch64.tar.gz", "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_macos_aarch64.tar.gz", "6b1eb03b3735946cb35216e063e7eebcc33a6bbf5dd96ec0217959bf1cdcb0cc", 19_146_957);
+#[cfg(all(target_os = "macos", not(target_arch = "aarch64")))]
+const PIPER_ENGINE: ModelInfo = piper_engine("piper_macos_x64.tar.gz", "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_macos_x64.tar.gz", "ced85c0a3df13945b1e623b878a48fdc2854d5c485b4b67f62857cf551deaf8b", 19_146_927);
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+const PIPER_ENGINE: ModelInfo = piper_engine("piper-unsupported", "https://github.com/rhasspy/piper/releases", "", 0);
+
 pub const MODELS: &[ModelInfo] = &[
     ModelInfo {
         id: "whisper-base",
@@ -53,16 +70,7 @@ pub const MODELS: &[ModelInfo] = &[
         sha256: "19fea4b380c3a618ec4723c3eef2eb785ffba0d0538cf43f8f235e7b3b34220f",
         size: 539_212_467,
     },
-    ModelInfo {
-        id: "piper-engine",
-        kind: "piper-engine",
-        label: "Mesin TTS Piper",
-        note: "22 MB. Program TTS offline (rhasspy/piper 2023.11.14-2, MIT).",
-        file: "piper_windows_amd64.zip",
-        url: "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip",
-        sha256: "f3c58906402b24f3a96d92145f58acba6d86c9b5db896d207f78dc80811efcea",
-        size: 22_477_236,
-    },
+    PIPER_ENGINE,
     ModelInfo {
         id: "piper-id",
         kind: "piper-voice",
@@ -133,7 +141,7 @@ pub fn piper_exe(dir: &Path) -> std::path::PathBuf {
     dir.join("piper").join(if cfg!(windows) { "piper.exe" } else { "piper" })
 }
 
-/// Mengekstrak zip mesin Piper dengan tar bawaan Windows 10/11, lalu menghapus zip-nya.
+/// Mengekstrak arsip mesin Piper (zip di Windows, tar.gz di Linux/macOS) dengan tar sistem, lalu menghapus arsipnya.
 pub fn extract_engine(dir: &Path, m: &ModelInfo) -> Result<(), String> {
     let zip = dir.join(m.file);
     let tar = if cfg!(windows) { std::path::PathBuf::from(std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into())).join("System32").join("tar.exe") } else { "tar".into() };

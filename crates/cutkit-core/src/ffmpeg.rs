@@ -65,6 +65,18 @@ pub fn find_tools(override_dir: Option<&str>) -> Option<Tools> {
         }
         candidates.push(Path::new(&local).join("Microsoft").join("WinGet").join("Links"));
     }
+    let own = local_ffmpeg_dir();
+    candidates.push(own.join("bin"));
+    if let Ok(entries) = std::fs::read_dir(&own) {
+        for e in entries.flatten() {
+            candidates.push(e.path().join("bin"));
+        }
+    }
+    if !cfg!(windows) {
+        for d in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/snap/bin", "/opt/local/bin"] {
+            candidates.push(PathBuf::from(d));
+        }
+    }
     for dir in candidates {
         let ffmpeg = dir.join(exe("ffmpeg"));
         let ffprobe = dir.join(exe("ffprobe"));
@@ -84,6 +96,46 @@ fn version_of(ffmpeg: &Path) -> Option<String> {
 }
 
 /// Mengecek apakah encoder Intel Quick Sync benar-benar bisa dipakai (bukan hanya terdaftar).
+/// ffmpeg yang diunduh CutKit sendiri (Linux): <data>/ffmpeg.
+pub fn local_ffmpeg_dir() -> PathBuf {
+    crate::paths::data_dir().join("ffmpeg")
+}
+
+/// Versi mayor dari string versi ffmpeg ("8.0.1", "n7.1-...", "9.0.2-full_build"); build git master = 99.
+pub fn major_version(version: &str) -> u32 {
+    let v = version.trim_start_matches('n');
+    if v.starts_with('N') || v.starts_with("git") {
+        return 99;
+    }
+    v.split(|c: char| !c.is_ascii_digit()).next().and_then(|d| d.parse().ok()).unwrap_or(99)
+}
+
+/// Filter whisper (auto caption) hanya ada di ffmpeg 8+ yang dibangun dengan whisper.cpp.
+pub fn has_whisper(ffmpeg: &str) -> bool {
+    quiet(Command::new(ffmpeg).args(["-hide_banner", "-filters"]))
+        .stdin(Stdio::null())
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.split_whitespace().nth(1) == Some("whisper")))
+        .unwrap_or(false)
+}
+
+/// ffmpeg di bawah 7 belum mengenal `-/filter_complex <file>`; pakai `-filter_complex_script` yang setara.
+fn compat_args(ffmpeg: &str, args: &[String]) -> Vec<String> {
+    if !args.iter().any(|a| a == "-/filter_complex") {
+        return args.to_vec();
+    }
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, u32>>> = std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    let major = {
+        let mut c = cache.lock().unwrap();
+        *c.entry(ffmpeg.to_string()).or_insert_with(|| version_of(Path::new(ffmpeg)).map(|v| major_version(&v)).unwrap_or(99))
+    };
+    if major >= 7 {
+        return args.to_vec();
+    }
+    args.iter().map(|a| if a == "-/filter_complex" { "-filter_complex_script".to_string() } else { a.clone() }).collect()
+}
+
 pub fn check_qsv(ffmpeg: &str) -> bool {
     quiet(Command::new(ffmpeg).args([
         "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=black:s=256x256:r=30:d=0.2", "-pix_fmt", "nv12", "-c:v", "h264_qsv", "-f", "null", "-",
@@ -105,7 +157,7 @@ pub fn probe(ffprobe: &str, path: &str) -> Result<MediaInfo, String> {
 
 /// Menjalankan ffmpeg sampai selesai; error ffmpeg dikembalikan sebagai pesan.
 pub fn run(ffmpeg: &str, args: &[String]) -> Result<(), String> {
-    let out = quiet(Command::new(ffmpeg).args(args)).stdin(Stdio::null()).output().map_err(|e| format!("ffmpeg gagal dijalankan: {e}"))?;
+    let out = quiet(Command::new(ffmpeg).args(compat_args(ffmpeg, args))).stdin(Stdio::null()).output().map_err(|e| format!("ffmpeg gagal dijalankan: {e}"))?;
     if out.status.success() {
         Ok(())
     } else {
@@ -135,17 +187,37 @@ pub fn has_winget() -> bool {
     quiet(Command::new("winget").arg("--version")).stdin(Stdio::null()).output().map(|o| o.status.success()).unwrap_or(false)
 }
 
-/// Memasang ffmpeg lewat winget; tiap baris keluaran diteruskan ke `on_line`.
-pub fn install_ffmpeg(mut on_line: impl FnMut(String)) -> Result<(), String> {
-    if !has_winget() {
-        return Err("winget tidak tersedia. Pasang \"App Installer\" dari Microsoft Store, atau unduh ffmpeg manual dari gyan.dev.".into());
+/// Cara CutKit memasang ffmpeg di OS ini, untuk ditampilkan ke pengguna (None = tidak bisa otomatis).
+pub fn installer_name() -> Option<&'static str> {
+    if cfg!(windows) {
+        has_winget().then_some("winget")
+    } else if cfg!(target_os = "macos") {
+        brew().map(|_| "Homebrew")
+    } else if cfg!(target_os = "linux") && (cfg!(target_arch = "x86_64") || cfg!(target_arch = "aarch64")) {
+        Some("unduhan ffmpeg statis (BtbN)")
+    } else {
+        None
     }
-    let mut child = quiet(Command::new("winget").args(winget_install_args()))
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("winget gagal dijalankan: {e}"))?;
+}
+
+/// Petunjuk pasang manual per OS.
+pub fn install_hint() -> &'static str {
+    if cfg!(windows) {
+        "winget install Gyan.FFmpeg"
+    } else if cfg!(target_os = "macos") {
+        "brew install ffmpeg"
+    } else {
+        "sudo apt install ffmpeg (butuh ffmpeg 7 atau lebih baru), atau klik Pasang otomatis"
+    }
+}
+
+fn brew() -> Option<PathBuf> {
+    ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"].iter().map(PathBuf::from).find(|p| p.is_file())
+}
+
+/// Menjalankan program dan meneruskan tiap baris keluaran (stdout, \r juga dianggap baris baru).
+fn stream_lines(mut cmd: Command, mut on_line: impl FnMut(String)) -> Result<std::process::ExitStatus, String> {
+    let mut child = quiet(&mut cmd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| e.to_string())?;
     let stdout = child.stdout.take().expect("stdout");
     let mut stderr = child.stderr.take().expect("stderr");
     let err_reader = std::thread::spawn(move || {
@@ -153,7 +225,6 @@ pub fn install_ffmpeg(mut on_line: impl FnMut(String)) -> Result<(), String> {
         let _ = stderr.read_to_string(&mut s);
         s
     });
-    // winget menimpa baris progres dengan \r; dipecah supaya tiap pembaruan terkirim.
     let mut buf = Vec::new();
     for byte in BufReader::new(stdout).bytes() {
         let Ok(b) = byte else { break };
@@ -169,11 +240,103 @@ pub fn install_ffmpeg(mut on_line: impl FnMut(String)) -> Result<(), String> {
     }
     let status = child.wait().map_err(|e| e.to_string())?;
     let err = err_reader.join().unwrap_or_default();
-    // Kode -1978335189 (0x8A15002B) = sudah terpasang versi terbaru; anggap berhasil.
-    if status.success() || status.code() == Some(-1978335189) {
-        Ok(())
-    } else {
-        Err(format!("winget berhenti dengan kode {:?}. {}", status.code(), err.trim()))
+    for l in err.lines().filter(|l| !l.trim().is_empty()).take(20) {
+        on_line(l.trim().to_string());
+    }
+    Ok(status)
+}
+
+/// Memasang ffmpeg: winget (Windows), Homebrew (macOS), atau build statis BtbN ke folder data CutKit
+/// (Linux, tanpa sudo, dicek SHA-256). Tiap baris proses diteruskan ke `on_line`.
+pub fn install_ffmpeg(mut on_line: impl FnMut(String)) -> Result<(), String> {
+    if cfg!(windows) {
+        if !has_winget() {
+            return Err("winget tidak tersedia. Pasang \"App Installer\" dari Microsoft Store, atau unduh ffmpeg manual dari gyan.dev.".into());
+        }
+        let mut cmd = Command::new("winget");
+        cmd.args(winget_install_args());
+        let status = stream_lines(cmd, &mut on_line).map_err(|e| format!("winget gagal dijalankan: {e}"))?;
+        // Kode -1978335189 (0x8A15002B) = sudah terpasang versi terbaru; anggap berhasil.
+        if status.success() || status.code() == Some(-1978335189) {
+            return Ok(());
+        }
+        return Err(format!("winget berhenti dengan kode {:?}.", status.code()));
+    }
+    if cfg!(target_os = "macos") {
+        let Some(brew) = brew() else {
+            return Err("Homebrew belum terpasang. Pasang dari https://brew.sh, lalu jalankan: brew install ffmpeg".into());
+        };
+        on_line("Menjalankan: brew install ffmpeg".into());
+        let mut cmd = Command::new(brew);
+        cmd.args(["install", "ffmpeg"]).env("HOMEBREW_NO_AUTO_UPDATE", "1");
+        let status = stream_lines(cmd, &mut on_line).map_err(|e| format!("brew gagal dijalankan: {e}"))?;
+        return if status.success() { Ok(()) } else { Err(format!("brew berhenti dengan kode {:?}.", status.code())) };
+    }
+    install_btbn(&mut on_line)
+}
+
+/// Build rilis stabil terbaru (bukan master) untuk arsitektur ini dari checksums.sha256 BtbN:
+/// "ffmpeg-n<versi>-latest-<arch>-gpl-<versi>.tar.xz" dengan versi tertinggi.
+pub fn btbn_pick(sums: &str, arch: &str) -> Option<String> {
+    sums.lines()
+        .filter_map(|l| l.split_whitespace().nth(1))
+        .map(|n| n.trim_start_matches('*'))
+        .filter(|n| n.starts_with("ffmpeg-n") && n.ends_with(".tar.xz") && n.contains(&format!("-latest-{arch}-gpl-")) && !n.contains("shared"))
+        .max_by_key(|n| {
+            let v = n.trim_start_matches("ffmpeg-n").split('-').next().unwrap_or("0");
+            v.split('.').map(|x| x.parse::<u32>().unwrap_or(0)).collect::<Vec<_>>()
+        })
+        .map(String::from)
+}
+
+/// Linux: ffmpeg statis terbaru dari BtbN/FFmpeg-Builds ke <data>/ffmpeg.
+fn install_btbn(on_line: &mut dyn FnMut(String)) -> Result<(), String> {
+    let arch = if cfg!(target_arch = "aarch64") { "linuxarm64" } else { "linux64" };
+    let base = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/";
+    on_line(format!("Mengambil daftar checksum {base}checksums.sha256"));
+    let sums = ureq::get(&format!("{base}checksums.sha256")).call().map_err(|e| e.to_string())?.into_body().read_to_string().map_err(|e| e.to_string())?;
+    let file = btbn_pick(&sums, arch).ok_or("Build ffmpeg statis untuk Linux tidak ditemukan di BtbN/FFmpeg-Builds.")?;
+    let name = file.trim_end_matches(".tar.xz").to_string();
+    let want = crate::setup::checksum_for(&sums, &file).ok_or_else(|| format!("{file} tidak ada di checksums.sha256"))?;
+    let dir = local_ffmpeg_dir();
+    let archive = dir.join(&file);
+    on_line(format!("Mengunduh {file}..."));
+    let mut last = 0u64;
+    crate::setup::download(&format!("{base}{file}"), &archive, Some(&want), |got, total| {
+        if got >= last + 8 * 1_048_576 || got == total {
+            last = got;
+            on_line(format!("{} / {} MB", got / 1_048_576, total.max(got) / 1_048_576));
+        }
+    })?;
+    on_line("Checksum SHA-256 cocok. Mengekstrak...".into());
+    let out = Command::new("tar").arg("-xJf").arg(&archive).arg("-C").arg(&dir).output().map_err(|e| format!("tar gagal dijalankan: {e}"))?;
+    let _ = std::fs::remove_file(&archive);
+    if !out.status.success() || !dir.join(&name).join("bin").join("ffmpeg").is_file() {
+        return Err(format!("Gagal mengekstrak ffmpeg: {}", String::from_utf8_lossy(&out.stderr)));
+    }
+    on_line(format!("ffmpeg terpasang di {}", dir.join(&name).display()));
+    Ok(())
+}
+
+#[cfg(test)]
+mod platform_tests {
+    use super::*;
+
+    #[test]
+    fn picks_newest_stable_btbn_build() {
+        let sums = "aa  ffmpeg-master-latest-linux64-gpl.tar.xz\nbb  ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz\ncc  ffmpeg-n9.0-latest-linux64-gpl-9.0.tar.xz\ndd  ffmpeg-n9.0-latest-linuxarm64-gpl-9.0.tar.xz\nee  ffmpeg-n9.0-latest-linux64-gpl-shared-9.0.tar.xz\nff  ffmpeg-n10.0-latest-win64-gpl-10.0.zip";
+        assert_eq!(btbn_pick(sums, "linux64").as_deref(), Some("ffmpeg-n9.0-latest-linux64-gpl-9.0.tar.xz"));
+        assert_eq!(btbn_pick(sums, "linuxarm64").as_deref(), Some("ffmpeg-n9.0-latest-linuxarm64-gpl-9.0.tar.xz"));
+        assert_eq!(btbn_pick("", "linux64"), None);
+    }
+
+    #[test]
+    fn parses_major_versions() {
+        assert_eq!(major_version("9.0.2-full_build-www.gyan.dev"), 9);
+        assert_eq!(major_version("n7.1-153-gaeb8631048"), 7);
+        assert_eq!(major_version("4.4.2-0ubuntu0.22.04.1"), 4);
+        assert_eq!(major_version("N-118960-g1ba5a5d4c8-20250312"), 99);
+        assert_eq!(compat_args("ffmpeg-tidak-ada", &["-i".into(), "x".into()]), vec!["-i".to_string(), "x".to_string()]);
     }
 }
 
@@ -262,7 +425,7 @@ fn run_step(ffmpeg: &str, work_dir: &Path, step: &ExportStep, cancel: Arc<Atomic
 }
 
 pub fn run_ffmpeg_progress(ffmpeg: &str, work_dir: &Path, args: &[String], cancel: Arc<AtomicBool>, mut on_progress: impl FnMut(f64, &str)) -> Result<(), String> {
-    let mut child = quiet(Command::new(ffmpeg).args(args).current_dir(work_dir))
+    let mut child = quiet(Command::new(ffmpeg).args(compat_args(ffmpeg, args)).current_dir(work_dir))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

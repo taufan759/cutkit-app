@@ -128,7 +128,13 @@ pub fn setup_python(models_dir: &Path, cancel: Arc<AtomicBool>, mut on_line: imp
             }
         }
         if !made {
-            return Err("Python 3 tidak ditemukan. Pasang dari python.org (centang \"Add to PATH\"), lalu coba lagi.".into());
+            return Err(if cfg!(windows) {
+                "Python 3 tidak ditemukan. Pasang dari python.org (centang \"Add to PATH\"), lalu coba lagi.".into()
+            } else if cfg!(target_os = "macos") {
+                "Python 3 tidak ditemukan. Pasang lewat: brew install python, lalu coba lagi.".into()
+            } else {
+                "Python 3 dengan modul venv tidak ditemukan. Pasang lewat: sudo apt install python3 python3-venv, lalu coba lagi.".into()
+            });
         }
     }
     on_line("Memasang onnxruntime, numpy, pillow (sekitar 60 MB)…".into());

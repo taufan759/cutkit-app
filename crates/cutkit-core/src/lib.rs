@@ -12,6 +12,7 @@ pub mod layout;
 pub mod matting;
 pub mod mcpcfg;
 pub mod model;
+pub mod paths;
 pub mod probe;
 pub mod proxy;
 pub mod setup;

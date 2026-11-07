@@ -11,6 +11,9 @@ const WEBVIEW2_BOOTSTRAPPER: &str = "https://go.microsoft.com/fwlink/p/?LinkId=2
 const WEBVIEW2_CLIENT: &str = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
 
 fn sys(name: &str) -> PathBuf {
+    if !cfg!(windows) {
+        return PathBuf::from(name.trim_end_matches(".exe"));
+    }
     let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
     PathBuf::from(root).join("System32").join(name)
 }
@@ -72,17 +75,44 @@ pub fn download(url: &str, dest: &Path, sha256: Option<&str>, mut on_progress: i
     Ok(())
 }
 
-/// Node.js portabel milik CutKit: `<folder aplikasi>\node\node.exe`.
-pub fn bundled_node(app_dir: &Path) -> PathBuf {
-    app_dir.join("node").join("node.exe")
+/// Folder induk Node.js portabel: folder program di Windows (dihapus uninstaller), folder data di
+/// Linux/macOS (folder program di sana tidak bisa ditulis).
+pub fn node_home(app_dir: Option<&Path>) -> PathBuf {
+    match app_dir {
+        Some(d) if cfg!(windows) => d.to_path_buf(),
+        _ => crate::paths::data_dir(),
+    }
 }
 
-/// Versi LTS terbaru untuk Windows x64 dari nodejs.org/dist/index.json.
+/// Node.js portabel milik CutKit: `<home>\node\node.exe` (Windows) atau `<home>/node/bin/node`.
+pub fn bundled_node(home: &Path) -> PathBuf {
+    if cfg!(windows) { home.join("node").join("node.exe") } else { home.join("node").join("bin").join("node") }
+}
+
+/// Nama paket Node.js untuk OS/arsitektur ini: (kunci di index.json, akhiran nama arsip).
+fn node_platform() -> (&'static str, &'static str) {
+    let arm = cfg!(target_arch = "aarch64");
+    if cfg!(windows) {
+        ("win-x64-zip", "win-x64.zip")
+    } else if cfg!(target_os = "macos") {
+        if arm { ("osx-arm64-tar", "darwin-arm64.tar.gz") } else { ("osx-x64-tar", "darwin-x64.tar.gz") }
+    } else if arm {
+        ("linux-arm64", "linux-arm64.tar.xz")
+    } else {
+        ("linux-x64", "linux-x64.tar.xz")
+    }
+}
+
+/// Versi LTS terbaru untuk OS ini dari nodejs.org/dist/index.json.
 pub fn latest_node_lts(index_json: &str) -> Option<String> {
+    latest_node_lts_for(index_json, node_platform().0)
+}
+
+fn latest_node_lts_for(index_json: &str, key: &str) -> Option<String> {
     let v: serde_json::Value = serde_json::from_str(index_json).ok()?;
     v.as_array()?
         .iter()
-        .filter(|r| r["lts"].as_str().is_some() && r["files"].as_array().map(|f| f.iter().any(|x| x == "win-x64-zip")).unwrap_or(false))
+        .filter(|r| r["lts"].as_str().is_some() && r["files"].as_array().map(|f| f.iter().any(|x| x == key)).unwrap_or(false))
         .filter_map(|r| r["version"].as_str())
         .map(|s| s.trim_start_matches('v').to_string())
         .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit() || c == '.'))
@@ -98,11 +128,12 @@ pub fn checksum_for(sums: &str, name: &str) -> Option<String> {
     })
 }
 
-/// Memasang Node.js LTS portabel (zip resmi, dicek SHA-256) ke `<app_dir>\node`.
+/// Memasang Node.js LTS portabel (arsip resmi, dicek SHA-256) ke `<home>/node`.
 /// Tidak menyentuh PATH maupun Node.js lain di komputer. Mengembalikan versi.
 pub fn install_node(app_dir: &Path, mut on_progress: impl FnMut(u64, u64)) -> Result<String, String> {
     let ver = latest_node_lts(&get_text(&format!("{NODE_DIST}index.json"))?).ok_or("Versi LTS Node.js tidak ditemukan di nodejs.org")?;
-    let zip_name = format!("node-v{ver}-win-x64.zip");
+    let suffix = node_platform().1;
+    let zip_name = format!("node-v{ver}-{suffix}");
     let base = format!("{NODE_DIST}v{ver}/");
     let want = checksum_for(&get_text(&format!("{base}SHASUMS256.txt"))?, &zip_name).ok_or("Checksum Node.js tidak ditemukan di SHASUMS256.txt")?;
     let work = app_dir.join("downloads");
@@ -112,8 +143,9 @@ pub fn install_node(app_dir: &Path, mut on_progress: impl FnMut(u64, u64)) -> Re
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
     let st = hidden(Command::new(sys("tar.exe")).arg("-xf").arg(&zip).arg("-C").arg(&tmp)).status().map_err(|e| format!("tar.exe gagal: {e}"))?;
-    let inner = tmp.join(format!("node-v{ver}-win-x64"));
-    if !st.success() || !inner.join("node.exe").is_file() {
+    let inner = tmp.join(zip_name.trim_end_matches(".zip").trim_end_matches(".tar.gz").trim_end_matches(".tar.xz"));
+    let probe = if cfg!(windows) { inner.join("node.exe") } else { inner.join("bin").join("node") };
+    if !st.success() || !probe.is_file() {
         let _ = std::fs::remove_dir_all(&tmp);
         return Err("Gagal mengekstrak zip Node.js.".into());
     }
@@ -168,7 +200,8 @@ mod tests {
             {"version":"v24.12.0","lts":"Krypton","files":["linux-x64"]},
             {"version":"v1.0.0;rm","lts":"X","files":["win-x64-zip"]}
         ]"#;
-        assert_eq!(latest_node_lts(idx).as_deref(), Some("24.11.1"));
+        assert_eq!(latest_node_lts_for(idx, "win-x64-zip").as_deref(), Some("24.11.1"));
+        assert_eq!(latest_node_lts_for(idx, "linux-x64"), Some("24.12.0".into()), "kunci per OS");
         assert_eq!(latest_node_lts("[]"), None);
     }
 

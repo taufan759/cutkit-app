@@ -62,11 +62,17 @@ pub fn uninstall(path: &Path, name: &str) -> Result<bool, String> {
     Ok(removed)
 }
 
-/// Mencari node.exe: Node.js portabel CutKit (`<app_dir>\node`), lalu PATH dan lokasi pemasangan umum.
+/// Mencari node: Node.js portabel CutKit, lalu PATH dan lokasi pemasangan umum.
 pub fn find_node(app_dir: Option<&Path>) -> Option<String> {
     let exe = if cfg!(windows) { "node.exe" } else { "node" };
-    let mut dirs: Vec<PathBuf> = app_dir.map(|d| vec![d.join("node")]).unwrap_or_default();
+    let own = crate::setup::bundled_node(&crate::setup::node_home(app_dir));
+    let mut dirs: Vec<PathBuf> = own.parent().map(|d| vec![d.to_path_buf()]).unwrap_or_default();
     dirs.extend(std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default());
+    if !cfg!(windows) {
+        for d in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"] {
+            dirs.push(PathBuf::from(d));
+        }
+    }
     if cfg!(windows) {
         for var in ["ProgramFiles", "ProgramFiles(x86)"] {
             if let Ok(d) = std::env::var(var) {
@@ -87,9 +93,16 @@ pub fn clients() -> Vec<(&'static str, &'static str, PathBuf)> {
     if let Some(h) = &home {
         v.push(("claude-code", "Claude Code (juga tab Code di aplikasi Claude)", h.join(".claude.json")));
     }
+    let mut desktop = if cfg!(target_os = "macos") {
+        home.as_ref().map(|h| h.join("Library").join("Application Support").join("Claude").join("claude_desktop_config.json"))
+    } else if cfg!(windows) {
+        std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("Claude").join("claude_desktop_config.json"))
+    } else {
+        let cfg = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).or_else(|| home.as_ref().map(|h| h.join(".config")));
+        cfg.map(|c| c.join("Claude").join("claude_desktop_config.json"))
+    };
     // Claude Desktop versi Microsoft Store menyimpan AppData di folder paketnya.
-    let mut desktop = std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("Claude").join("claude_desktop_config.json"));
-    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+    if let Some(local) = std::env::var_os("LOCALAPPDATA").filter(|_| cfg!(windows)) {
         if let Ok(entries) = std::fs::read_dir(PathBuf::from(local).join("Packages")) {
             for e in entries.flatten() {
                 let roaming = e.path().join("LocalCache").join("Roaming").join("Claude");
