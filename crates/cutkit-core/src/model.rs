@@ -343,7 +343,7 @@ impl Default for Transition {
 
 impl Transition {
     pub fn is_active(&self) -> bool {
-        matches!(self.kind.as_str(), "fade" | "slide-left" | "slide-right" | "slide-up" | "slide-down" | "push-left" | "push-right") && self.duration > 0.0
+        crate::transition::known(&self.kind) && self.duration > 0.0
     }
 }
 

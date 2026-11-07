@@ -421,3 +421,60 @@ fn keyframes_render_motion_and_fade() {
     assert!(start_right[0] < 40, "awal: kanan kosong {start_right:?}");
     assert!(end_right[0] > 30 && end_right[0] < 110, "akhir: kotak di kanan dan memudar ke ~20%: {end_right:?}");
 }
+
+#[test]
+fn every_transition_renders() {
+    let Some(tools) = find_tools(None) else {
+        eprintln!("ffmpeg tidak ditemukan, tes semua transisi dilewati");
+        return;
+    };
+    let dir = tmp_dir("semua-transisi");
+    let s = |p: &PathBuf| p.to_string_lossy().to_string();
+    let mk = |name: &str, color: &str| {
+        let out = dir.join(name);
+        run(&tools.ffmpeg, &["-hide_banner", "-y", "-loglevel", "error", "-f", "lavfi", "-i", &format!("color=c={color}:s=320x192:r=30:d=3"), "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", &s(&out)].map(String::from)).unwrap();
+        out
+    };
+    let red = mk("merah.mp4", "red");
+    let blue = mk("biru.mp4", "blue");
+    let is_red = |c: [u8; 3]| c[0] > 190 && c[2] < 70;
+    let is_blue = |c: [u8; 3]| c[2] > 190 && c[0] < 70;
+    let mixed = |c: [u8; 3]| c[0] > 50 && c[2] > 50;
+    for kind in cutkit_core::transition::KINDS {
+        let mut p = Project::new("transisi");
+        p.canvas = Canvas { width: 320, height: 192, fps: 30.0, background: "#000000".into() };
+        for (id, path) in [("r", &red), ("b", &blue)] {
+            p.assets.push(Asset { id: id.into(), path: s(path), kind: AssetKind::Video, duration: 3.0, width: 320, height: 192, has_video: true, ..Default::default() });
+        }
+        // Merah 0-2 detik; biru menumpuk mulai detik 1 dengan transisi 1 detik, jadi tengahnya di 1.5.
+        p.tracks[0].clips.push(Clip { id: "a".into(), asset_id: Some("r".into()), start: 0.0, duration: 2.0, ..Default::default() });
+        p.tracks[0].clips.push(Clip { id: "b".into(), asset_id: Some("b".into()), start: 1.0, duration: 2.0, transition: Transition { kind: kind.to_string(), duration: 1.0 }, ..Default::default() });
+        let out = dir.join(format!("{kind}.mp4"));
+        let plan = build_plan(&p, &ExportOptions { output: s(&out), quality: Quality::Fast, ..Default::default() }).unwrap();
+        run_export(&tools.ffmpeg, &dir.join(format!("kerja-{kind}")), &plan, Arc::new(AtomicBool::new(false)), |_| {}).unwrap_or_else(|e| panic!("{kind}: {e}"));
+        let o = s(&out);
+        let px = |t: f64, x: u32, y: u32| pixel(&tools.ffmpeg, &o, t, x, y);
+        assert!(is_red(px(0.5, 160, 96)), "{kind}: sebelum transisi merah");
+        assert!(is_blue(px(2.5, 160, 96)), "{kind}: sesudah transisi biru {:?}", px(2.5, 160, 96));
+        let (l, r, top, bot, c) = (px(1.5, 30, 96), px(1.5, 290, 96), px(1.5, 160, 20), px(1.5, 160, 172), px(1.5, 160, 96));
+        match *kind {
+            "fade" | "blur" | "zoom" | "spin" => assert!(mixed(c), "{kind}: tengah campuran {c:?}"),
+            "dip-black" => assert!(c.iter().all(|v| *v < 45), "{kind}: hitam di tengah {c:?}"),
+            "dip-white" => assert!(c.iter().all(|v| *v > 210), "{kind}: putih di tengah {c:?}"),
+            "slide-left" | "push-left" | "whip-left" | "wipe-left" | "clock" => assert!(is_red(l) && is_blue(r), "{kind}: kiri merah {l:?}, kanan biru {r:?}"),
+            "slide-right" | "push-right" | "whip-right" | "wipe-right" => assert!(is_blue(l) && is_red(r), "{kind}: kiri biru {l:?}, kanan merah {r:?}"),
+            "slide-up" | "wipe-up" => assert!(is_red(top) && is_blue(bot), "{kind}: atas merah {top:?}, bawah biru {bot:?}"),
+            "slide-down" | "wipe-down" => assert!(is_blue(top) && is_red(bot), "{kind}: atas biru {top:?}, bawah merah {bot:?}"),
+            "iris" => assert!(is_blue(c) && is_red(px(1.5, 4, 4)), "{kind}: tengah biru, sudut merah"),
+            "dissolve" => {
+                let blues = (0..24).filter(|i| { let c = px(1.5, 13 + (i % 6) * 53, 20 + (i / 6) * 45); c[2] > c[0] }).count();
+                assert!((5..=19).contains(&blues), "{kind}: sebagian biru, sebagian merah ({blues}/24)");
+            }
+            "pixelate" | "glitch" => {
+                assert!(is_red(px(1.3, 160, 96)), "{kind}: sebelum tengah masih merah");
+                assert!(is_blue(px(1.7, 160, 96)), "{kind}: sesudah tengah biru {:?}", px(1.7, 160, 96));
+            }
+            other => panic!("transisi {other} belum dites"),
+        }
+    }
+}

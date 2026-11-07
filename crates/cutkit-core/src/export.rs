@@ -189,31 +189,26 @@ pub fn keyframe_value(kfs: &[Keyframe], lt: f64, get: impl Fn(&Keyframe) -> f64)
     get(&kfs[kfs.len() - 1])
 }
 
-/// Ekspresi easing halus (smoothstep) dari kemajuan transisi di waktu `t`.
-fn ease_expr(start: f64, dur: f64) -> String {
-    format!("st(0,clip((t-{})/{},0,1));ld(0)*ld(0)*(3-2*ld(0))", f(start), f(dur.max(0.001)))
-}
-
 /// Ekspresi posisi overlay x dan y untuk transisi masuk/keluar (geser/dorong), dari posisi dasar.
 fn overlay_xy(base: (String, String), w: u32, h: u32, t_in: &Option<(String, f64, f64)>, t_out: &Option<(String, f64, f64)>) -> (String, String) {
     let (mut x, mut y) = base;
     let p = Placement { x: 0, y: 0, w: 0, h: 0, ow: 0, oh: 0, radians: 0.0 };
     let _ = p;
     if let Some((kind, d, s)) = t_in {
-        let e = ease_expr(*s, *d);
+        let e = crate::transition::ease_expr(kind, *s, *d);
         match kind.as_str() {
-            "slide-left" | "push-left" => x = format!("{x}+{w}*(1-({e}))"),
-            "slide-right" | "push-right" => x = format!("{x}-{w}*(1-({e}))"),
+            "slide-left" | "push-left" | "whip-left" => x = format!("{x}+{w}*(1-({e}))"),
+            "slide-right" | "push-right" | "whip-right" => x = format!("{x}-{w}*(1-({e}))"),
             "slide-up" => y = format!("{y}+{h}*(1-({e}))"),
             "slide-down" => y = format!("{y}-{h}*(1-({e}))"),
             _ => {}
         }
     }
     if let Some((kind, d, s)) = t_out {
-        let e = ease_expr(*s, *d);
+        let e = crate::transition::ease_expr(kind, *s, *d);
         match kind.as_str() {
-            "push-left" => x = format!("{x}-{w}*({e})"),
-            "push-right" => x = format!("{x}+{w}*({e})"),
+            "push-left" | "whip-left" => x = format!("{x}-{w}*({e})"),
+            "push-right" | "whip-right" => x = format!("{x}+{w}*({e})"),
             _ => {}
         }
     }
@@ -381,7 +376,7 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String, Ve
                 });
                 // Awal transisi di waktu pass ini (bisa negatif bila klip terpotong di batas bagian).
                 let t_in = incoming.map(|t| (t.kind.clone(), t.duration, clip.start - clip.offset));
-                let t_out = next.filter(|n| n.transition.kind.starts_with("push")).map(|n| (n.transition.kind.clone(), n.transition.duration, n.start - n.offset));
+                let t_out = next.filter(|n| crate::transition::is_push(&n.transition.kind)).map(|n| (n.transition.kind.clone(), n.transition.duration, n.start - n.offset));
                 // LUT disalin ke folder kerja dengan nama sederhana agar tidak perlu escape path di filter.
                 let lut_name = (!clip.color.lut.trim().is_empty()).then(|| {
                     if let Some((name, _)) = copies.iter().find(|(_, src)| src == &clip.color.lut) {
@@ -443,6 +438,12 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String, Ve
             } else {
                 format!("setpts=PTS-STARTPTS+{}/TB", f(v.start))
             };
+            // Transisi mask mencampur klip baru dengan komposisi sebelum klip ini.
+            let mask_kind = v.t_in.as_ref().filter(|(k, _, _)| crate::transition::is_mask(k)).cloned();
+            if mask_kind.is_some() {
+                g.push(format!("{cur}split[pre{i}][cur{i}]"));
+                cur = format!("[cur{i}]");
+            }
             let mut base = cur.clone();
             let mut src = format!("[{}:v]", v.input);
             if v.blur_bg {
@@ -452,7 +453,7 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String, Ve
                     v.color
                 ));
                 let fade_bg = match &v.t_in {
-                    Some((k, d, s)) if k == "fade" => format!(",fade=t=in:st={}:d={}:alpha=1", f(*s), f(*d)),
+                    Some((k, d, s)) if crate::transition::fades_alpha(k) => crate::transition::fade_in(*s, *d, fps, &format!("fb{i}")),
                     _ => String::new(),
                 };
                 if !fade_bg.is_empty() {
@@ -496,9 +497,38 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String, Ve
             if let Some(kf) = &v.kf {
                 chain.push_str(&kf.chain);
             }
+            // Zoom/spin: skala (dan putaran) per frame, lalu dipad ke kotak tetap agar ukuran frame konstan.
+            let mut centered: Option<(u32, u32)> = None;
+            if let (Some((k, d, s)), None) = (&v.t_in, &v.kf) {
+                let (lw, lh) = if p.radians.abs() > 1e-9 { (p.ow, p.oh) } else { (p.w, p.h) };
+                let e = crate::transition::ease_expr(k, *s, *d);
+                if k == "zoom" {
+                    let z = crate::transition::ZOOM_FROM;
+                    let (bw, bh) = ((lw as f64 * z).ceil() as u32 + 2, (lh as f64 * z).ceil() as u32 + 2);
+                    let (bw, bh) = (bw + bw % 2, bh + bh % 2);
+                    chain.push_str(&format!(
+                        ",scale=w='max(2,2*trunc({lw}*(1+{}*(1-({e})))/2))':h='max(2,2*trunc({lh}*(1+{}*(1-({e})))/2))':eval=frame,pad=w={bw}:h={bh}:x='(ow-iw)/2':y='(oh-ih)/2':color=0x00000000:eval=frame",
+                        f(z - 1.0),
+                        f(z - 1.0)
+                    ));
+                    centered = Some((bw, bh));
+                } else if k == "spin" {
+                    let s0 = crate::transition::SPIN_SCALE_FROM;
+                    let dg = ((lw as f64).hypot(lh as f64)).ceil() as u32 + 2;
+                    let dg = dg + dg % 2;
+                    chain.push_str(&format!(
+                        ",scale=w='max(2,2*trunc({lw}*({}+{}*({e}))/2))':h='max(2,2*trunc({lh}*({}+{}*({e}))/2))':eval=frame,pad=w={dg}:h={dg}:x='(ow-iw)/2':y='(oh-ih)/2':color=0x00000000:eval=frame,rotate=a='-PI/2*(1-({e}))':ow={dg}:oh={dg}:c=0x00000000",
+                        f(s0),
+                        f(1.0 - s0),
+                        f(s0),
+                        f(1.0 - s0)
+                    ));
+                    centered = Some((dg, dg));
+                }
+            }
             if let Some((k, d, s)) = &v.t_in {
-                if k == "fade" {
-                    chain.push_str(&format!(",fade=t=in:st={}:d={}:alpha=1", f(*s), f(*d)));
+                if crate::transition::fades_alpha(k) {
+                    chain.push_str(&crate::transition::fade_in(*s, *d, fps, &format!("fi{i}")));
                 }
             }
             chain.push_str(&format!("[v{i}]"));
@@ -507,17 +537,60 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String, Ve
                 Some(kf) => (kf.x.clone(), kf.y.clone()),
                 None => (p.x.to_string(), p.y.to_string()),
             };
+            let base_xy = match centered {
+                Some((bw, bh)) => {
+                    let (lw, lh) = if p.radians.abs() > 1e-9 { (p.ow, p.oh) } else { (p.w, p.h) };
+                    (f(p.x as f64 + lw as f64 / 2.0 - bw as f64 / 2.0), f(p.y as f64 + lh as f64 / 2.0 - bh as f64 / 2.0))
+                }
+                None => base_xy,
+            };
             let (ox, oy) = overlay_xy(base_xy, w, h, &v.t_in, &v.t_out);
             let quote = |e: String| if e.contains('(') { format!("'{e}'") } else { e };
+            // Dip/pikselasi/glitch: klip baru muncul di tengah transisi, saat tertutup warna atau efek.
+            let shown = match &v.t_in {
+                Some((k, d, s)) if crate::transition::swaps_at_half(k) => v.start.max(s + d / 2.0),
+                _ => v.start,
+            };
             g.push(format!(
                 "{base}[v{i}]overlay=x={}:y={}:format=rgb:eof_action=pass:enable='between(t,{},{})'[b{}]",
                 quote(ox),
                 quote(oy),
-                f(v.start),
+                f(shown),
                 f(v.end),
                 i + 1
             ));
             cur = format!("[b{}]", i + 1);
+            if let Some((k, d, s)) = &v.t_in {
+                if mask_kind.is_some() {
+                    // Mask kecil dari geq (murah), diperbesar, lalu klip baru dan komposisi lama dicampur.
+                    let (mw, mh) = crate::transition::mask_size(w, h);
+                    g.push(format!(
+                        "color=c=black:s={mw}x{mh}:r={}:d={},format=gray,geq=lum='{}',scale={w}:{h}:flags=bilinear,format=gbrp[m{i}]",
+                        f(fps),
+                        f(duration),
+                        crate::transition::mask_geq(k, *s, *d)
+                    ));
+                    g.push(format!("{cur}format=gbrp[nw{i}]"));
+                    g.push(format!("[pre{i}]format=gbrp[od{i}]"));
+                    g.push(format!("[nw{i}][od{i}][m{i}]maskedmerge=enable='between(t,{},{})'[mx{i}]", f(*s), f(s + d)));
+                    cur = format!("[mx{i}]");
+                }
+                if k == "dip-black" || k == "dip-white" {
+                    let c = if k == "dip-black" { "black" } else { "white" };
+                    g.push(format!(
+                        "color=c={c}:s={w}x{h}:r={}:d={},format=rgba{}[dp{i}]",
+                        f(fps),
+                        f(duration),
+                        crate::transition::dip_alpha(*s, *d, fps, &format!("dp{i}"))
+                    ));
+                    g.push(format!("{cur}[dp{i}]overlay=format=rgb:enable='between(t,{},{})'[dx{i}]", f(*s), f(s + d)));
+                    cur = format!("[dx{i}]");
+                }
+                if let Some(pf) = crate::transition::post_filter(k, *s, *d, w, fps, i) {
+                    g.push(format!("{cur}{pf}[tp{i}]"));
+                    cur = format!("[tp{i}]");
+                }
+            }
         }
         apply_fx(&mut g, &mut cur, visuals.len(), &mut fx_iter);
         let last = cur.clone();
