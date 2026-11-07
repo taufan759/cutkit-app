@@ -1,0 +1,10 @@
+{
+  "bundle": {
+    "targets": [
+      "nsis"
+    ],
+    "resources": {
+      "../target/release/cutkit-cli.exe": "mcp/cutkit-cli.exe"
+    }
+  }
+}

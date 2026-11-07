@@ -14,7 +14,9 @@
     "build:cli": "cargo build --release -p cutkit-cli",
     "mcp": "node mcp/server.js",
     "build:nsis": "cargo build --release -p cutkit-cli && tauri build",
-    "test:setup": "cargo test -p cutkit-core --test setup_real -- --ignored --nocapture"
+    "test:setup": "cargo test -p cutkit-core --test setup_real -- --ignored --nocapture",
+    "build:linux": "cargo build --release -p cutkit-cli && tauri build --bundles deb,appimage",
+    "build:mac": "sh scripts/build-mac.sh"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

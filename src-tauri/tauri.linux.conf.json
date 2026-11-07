@@ -1,0 +1,16 @@
+{
+  "bundle": {
+    "targets": [
+      "deb",
+      "appimage"
+    ],
+    "resources": {
+      "../target/release/cutkit-cli": "mcp/cutkit-cli"
+    },
+    "linux": {
+      "deb": {
+        "section": "video"
+      }
+    }
+  }
+}
