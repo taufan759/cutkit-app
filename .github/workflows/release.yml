@@ -127,7 +127,7 @@ jobs:
         with:
           node-version: 22
 
-      - name: ffmpeg untuk tes (ffmpeg-full: termasuk libass)
+      - name: ffmpeg-full untuk tes (termasuk libass)
         run: |
           brew install ffmpeg-full
           echo "$(brew --prefix ffmpeg-full)/bin" >> "$GITHUB_PATH"
