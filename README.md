@@ -132,6 +132,8 @@ Waktu dalam detik. Yang juga diterima:
 ## Atribusi
 
 - Stiker emoji: [Twemoji](https://github.com/jdecked/twemoji) © Twitter, Inc. dan kontributor, CC-BY 4.0 (lihat `ui/stickers`).
+- Font caption Anton, Bebas Neue, Archivo Black, Bangers, dan Poppins dari [Google Fonts](https://github.com/google/fonts), SIL Open Font License 1.1 (lisensi tiap font di `ui/fonts`).
+- Bank CutKit (SFX, musik, latar, overlay) dibuat dari rumus ffmpeg di komputer pengguna, tanpa file pihak ketiga: bebas dipakai (CC0).
 - Model AI pihak ketiga di atas diunduh saat dipakai dan tidak ikut di dalam installer.
 
 ## Cara kerja ekspor

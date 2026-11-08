@@ -325,8 +325,9 @@ fn path_exists(path: String) -> bool {
 /// Memulai ekspor di thread latar; progres dikirim lewat event `export-progress`,
 /// hasil akhir lewat `export-done` ({ ok, output, error }).
 #[tauri::command]
-fn export_start(app: AppHandle, project: Project, options: ExportOptions, state: State<AppState>) -> Result<(), String> {
+fn export_start(app: AppHandle, project: Project, mut options: ExportOptions, state: State<AppState>) -> Result<(), String> {
     let tools = state.tools()?;
+    options.fonts_dir = fonts_dir(&app);
     let job = build_job(&project, &options)?;
     let cancel = Arc::new(AtomicBool::new(false));
     {
@@ -365,9 +366,23 @@ fn export_cancel(state: State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Font caption bawaan (OFL): folder resource aplikasi terpasang, atau ui/fonts saat pengembangan.
+fn fonts_dir(app: &AppHandle) -> String {
+    let mut c = vec![];
+    if let Ok(r) = app.path().resource_dir() {
+        c.push(r.join("fonts"));
+    }
+    if let Some(d) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
+        c.push(d.join("fonts"));
+    }
+    c.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("ui").join("fonts"));
+    cutkit_core::paths::find_fonts_dir(&c).map(|d| d.to_string_lossy().trim_start_matches(r"\\?\").to_string()).unwrap_or_default()
+}
+
 /// Perintah ffmpeg lengkap untuk disalin pengguna (berguna saat debugging).
 #[tauri::command]
-fn export_preview_command(project: Project, options: ExportOptions) -> Result<serde_json::Value, String> {
+fn export_preview_command(app: AppHandle, project: Project, mut options: ExportOptions) -> Result<serde_json::Value, String> {
+    options.fonts_dir = fonts_dir(&app);
     let plan = build_plan(&project, &options)?;
     Ok(serde_json::json!({ "args": plan.args, "filter": plan.filter_script, "ass": plan.ass }))
 }

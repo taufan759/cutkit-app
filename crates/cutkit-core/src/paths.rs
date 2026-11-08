@@ -48,6 +48,11 @@ pub fn models_dir() -> PathBuf {
     data_dir().join("models")
 }
 
+/// Folder font bawaan (OFL) di antara kandidat: folder resource aplikasi terpasang atau ui/fonts di repo.
+pub fn find_fonts_dir(candidates: &[PathBuf]) -> Option<PathBuf> {
+    candidates.iter().find(|d| d.join("Anton-Regular.ttf").is_file()).cloned()
+}
+
 /// Nama file program untuk OS ini (".exe" di Windows).
 pub fn exe(name: &str) -> String {
     if cfg!(windows) { format!("{name}.exe") } else { name.to_string() }

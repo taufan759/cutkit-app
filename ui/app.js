@@ -9,7 +9,8 @@ const LIBRARY_PLACES = [
   { name: "Sound Effect Meme", path: "D:\\Master\\Music\\Sound Effect Meme" },
   { name: "Bank Flow", path: "D:\\Master\\Videos\\Bank Flow" },
 ];
-const FONTS = ["Impact", "Arial Black", "Arial", "Segoe UI", "Segoe UI Black", "Bahnschrift", "Verdana", "Tahoma", "Trebuchet MS", "Georgia", "Comic Sans MS", "Consolas"];
+// Lima font pertama ikut CutKit (OFL, ui/fonts) jadi tersedia di semua OS; sisanya font sistem.
+const FONTS = ["Anton", "Bebas Neue", "Archivo Black", "Bangers", "Poppins", "Impact", "Arial Black", "Arial", "Segoe UI", "Segoe UI Black", "Bahnschrift", "Verdana", "Tahoma", "Trebuchet MS", "Georgia", "Comic Sans MS", "Consolas"];
 const VIDEO_EXT = ["mp4", "mov", "mkv", "webm", "avi", "m4v", "gif", "wmv", "flv", "ts", "mts", "3gp"];
 const IMAGE_EXT = ["png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff", "avif"];
 const AUDIO_EXT = ["mp3", "wav", "m4a", "aac", "ogg", "opus", "flac", "wma"];

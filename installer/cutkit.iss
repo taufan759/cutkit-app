@@ -95,6 +95,7 @@ Source: "..\target\release\cutkit-cli.exe"; DestDir: "{app}\mcp"; Flags: ignorev
 Source: "..\mcp\server.js"; DestDir: "{app}\mcp"; Flags: ignoreversion
 Source: "..\ui\core\*.js"; DestDir: "{app}\ui\core"; Flags: ignoreversion
 Source: "..\ui\templates\*.json"; DestDir: "{app}\ui\templates"; Flags: ignoreversion
+Source: "..\ui\fonts\*"; DestDir: "{app}\fonts"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 ; Versi untuk serverInfo MCP.
@@ -114,6 +115,7 @@ Filename: "{app}\cutkit-app.exe"; Description: "{cm:OpenNow}"; Flags: postinstal
 Type: filesandordirs; Name: "{app}\node"
 Type: filesandordirs; Name: "{app}\mcp"
 Type: filesandordirs; Name: "{app}\ui"
+Type: filesandordirs; Name: "{app}\fonts"
 Type: filesandordirs; Name: "{app}\downloads"
 Type: dirifempty; Name: "{app}"
 

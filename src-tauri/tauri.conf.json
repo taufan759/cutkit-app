@@ -45,7 +45,8 @@
       "../mcp/server.js": "mcp/server.js",
       "../ui/core/*.js": "ui/core/",
       "../ui/templates/*.json": "ui/templates/",
-      "../package.json": "package.json"
+      "../package.json": "package.json",
+      "../ui/fonts/*": "fonts/"
     },
     "longDescription": "CutKit: editor video offline untuk Shorts 9:16 dan YouTube. Auto caption Whisper, TTS, hapus background, transisi, efek, keyframe, dan server MCP untuk Claude.",
     "publisher": "Taufan",

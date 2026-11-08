@@ -48,6 +48,26 @@ pub struct ExportOptions {
     pub quality: Quality,
     /// Ratakan kerasnya suara ke -14 LUFS (patokan YouTube) dengan loudnorm.
     pub normalize_loudness: bool,
+    /// Folder font bawaan CutKit (OFL) yang dipakai libass selain font sistem; kosong = font sistem saja.
+    pub fonts_dir: String,
+}
+
+/// File font (.ttf/.otf) di `dir`, diurutkan supaya rencana ekspor stabil.
+pub fn font_files(dir: &str) -> Vec<String> {
+    if dir.trim().is_empty() {
+        return vec![];
+    }
+    let mut v: Vec<String> = std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().and_then(|x| x.to_str()).map(|x| x.eq_ignore_ascii_case("ttf") || x.eq_ignore_ascii_case("otf")).unwrap_or(false))
+                .map(|p| p.to_string_lossy().to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    v.sort();
+    v
 }
 
 /// Target loudness YouTube: -14 LUFS, puncak -1.5 dBTP.
@@ -276,6 +296,8 @@ struct Pass {
     ass_file: String,
     /// Panjang keluaran (detik); bisa lebih panjang dari klip terakhir pada bagian video.
     duration: f64,
+    /// Font bawaan yang disalin ke folder kerja untuk libass (fontsdir=.).
+    fonts: Vec<String>,
 }
 
 fn is_visual(track_kind: TrackKind, hidden: bool, clip_kind: ClipKind, asset_kind: AssetKind) -> bool {
@@ -595,6 +617,7 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String, Ve
         apply_fx(&mut g, &mut cur, visuals.len(), &mut fx_iter);
         let last = cur.clone();
         match &pass.ass {
+            Some(_) if !pass.fonts.is_empty() => g.push(format!("{last}ass={}:fontsdir=.,format=yuv420p[vout]", pass.ass_file)),
             Some(_) => g.push(format!("{last}ass={},format=yuv420p[vout]", pass.ass_file)),
             None => g.push(format!("{last}format=yuv420p[vout]")),
         }
@@ -645,6 +668,13 @@ fn build_pass(project: &Project, pass: &Pass) -> Result<(Vec<String>, String, Ve
     }
     if pass.audio {
         args.extend(strings(&["-map", "[aout]"]));
+    }
+    let mut copies = copies;
+    if pass.ass.is_some() {
+        for (k, src) in pass.fonts.iter().enumerate() {
+            let ext = std::path::Path::new(src).extension().and_then(|x| x.to_str()).unwrap_or("ttf");
+            copies.push((format!("cutkit-font-{k}.{ext}"), src.clone()));
+        }
     }
     Ok((args, filter_script, copies))
 }
@@ -697,6 +727,7 @@ pub fn build_plan(project: &Project, opts: &ExportOptions) -> Result<ExportPlan,
         filter_file: FILTER_FILE.into(),
         ass_file: ASS_FILE.into(),
         duration,
+        fonts: font_files(&opts.fonts_dir),
     };
     let (mut args, filter_script, copies) = build_pass(project, &pass)?;
     args.extend(video_codec_args(opts, project.canvas.fps));
@@ -794,7 +825,7 @@ fn header() -> Vec<String> {
 /// Satu frame proyek di waktu `t` sebagai PNG (tinggi maksimal `max_height`), memakai
 /// penyusun yang sama dengan ekspor sehingga gambarnya sama dengan hasil MP4.
 /// Hanya klip di sekitar `t` yang didekode, jadi cepat juga untuk video panjang.
-pub fn build_frame(project: &Project, t: f64, output: &str, max_height: u32) -> Result<ExportJob, String> {
+pub fn build_frame(project: &Project, t: f64, output: &str, max_height: u32, fonts_dir: &str) -> Result<ExportJob, String> {
     let duration = check(project, &ExportOptions { output: output.to_string(), ..Default::default() })?;
     let fps = project.canvas.fps.max(1.0);
     let t0 = (t.max(0.0) * fps).floor() / fps;
@@ -802,7 +833,7 @@ pub fn build_frame(project: &Project, t: f64, output: &str, max_height: u32) -> 
     let t1 = t0 + 2.0 / fps;
     let wp = window_project(project, t0, t1);
     let ass_text = ass::build_ass_window(project, t0, t1);
-    let pass = Pass { video: true, audio: false, loudnorm: false, ass: ass_text.clone(), filter_file: FILTER_FILE.into(), ass_file: ASS_FILE.into(), duration: t1 - t0 };
+    let pass = Pass { video: true, audio: false, loudnorm: false, ass: ass_text.clone(), filter_file: FILTER_FILE.into(), ass_file: ASS_FILE.into(), duration: t1 - t0, fonts: font_files(fonts_dir) };
     let (mut args, filter, copies) = build_pass(&wp, &pass)?;
     args.extend(strings(&["-an", "-frames:v", "1", "-update", "1", "-f", "image2", "cutkit-frame.png"]));
     let mut files = vec![(FILTER_FILE.to_string(), filter)];
@@ -841,7 +872,7 @@ pub fn build_job(project: &Project, opts: &ExportOptions) -> Result<ExportJob, S
     let mut steps = vec![];
 
     // 1. Seluruh audio sekali jalan ke WAV (decoder audio ringan, jadi semua klip boleh dibuka).
-    let audio_pass = Pass { video: false, audio: true, loudnorm: false, ass: None, filter_file: "cutkit-audio-filter.txt".into(), ass_file: String::new(), duration };
+    let audio_pass = Pass { video: false, audio: true, loudnorm: false, ass: None, filter_file: "cutkit-audio-filter.txt".into(), ass_file: String::new(), duration, fonts: vec![] };
     let (mut args, filter, _) = build_pass(project, &audio_pass)?;
     args.extend(strings(&["-c:a", "pcm_s16le", "-ar", "48000", "-t", &f(duration), "-f", "wav", "cutkit-audio.wav"]));
     steps.push(ExportStep { label: "Audio".into(), args, files: vec![(audio_pass.filter_file.clone(), filter)], copies: vec![], duration, weight: w_audio });
@@ -861,6 +892,7 @@ pub fn build_job(project: &Project, opts: &ExportOptions) -> Result<ExportJob, S
             filter_file: format!("cutkit-filter-{i}.txt"),
             ass_file: format!("cutkit-captions-{i}.ass"),
             duration: len,
+            fonts: font_files(&opts.fonts_dir),
         };
         let (mut args, filter, copies) = build_pass(&wp, &pass)?;
         args.extend(video_codec_args(opts, fps));
@@ -916,13 +948,30 @@ mod tests {
 
     #[test]
     fn frame_decodes_only_clips_around_t() {
-        let job = build_frame(&project(), 3.2, "D:/out/f.png", 720).unwrap();
+        let job = build_frame(&project(), 3.2, "D:/out/f.png", 720, "").unwrap();
         let a = job.steps[0].args.join(" ");
         assert!(a.contains("-ss 5.7"), "video maju ke detik 3.2 sumber: {a}");
         assert!(!a.contains("x.png"), "meme sudah lewat di detik 3.2");
         assert!(a.ends_with("-an -frames:v 1 -update 1 -f image2 cutkit-frame.png"));
         assert!(job.steps[1].args.join(" ").contains("min(ih,720)"));
-        assert!(build_frame(&Project::new("x"), 0.0, "f.png", 720).is_err());
+        assert!(build_frame(&Project::new("x"), 0.0, "f.png", 720, "").is_err());
+    }
+
+    #[test]
+    fn bundled_fonts_are_copied_for_libass() {
+        let dir = std::env::temp_dir().join(format!("cutkit-fonts-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Anton-Regular.ttf"), b"x").unwrap();
+        std::fs::write(dir.join("OFL.txt"), b"x").unwrap();
+        let mut p = project();
+        p.captions.enabled = true;
+        p.captions.words = vec![crate::model::Word { text: "HALO".into(), start: 0.0, end: 1.0 }];
+        let plan = build_plan(&p, &ExportOptions { output: "D:/out/x.mp4".into(), fonts_dir: dir.to_string_lossy().to_string(), ..Default::default() }).unwrap();
+        assert!(plan.filter_script.contains("ass=cutkit-captions.ass:fontsdir=.,format=yuv420p[vout]"), "{}", plan.filter_script);
+        assert_eq!(plan.copies.iter().filter(|(n, _)| n.starts_with("cutkit-font-")).count(), 1, "hanya .ttf/.otf");
+        let plain = build_plan(&p, &opts()).unwrap();
+        assert!(plain.filter_script.contains("ass=cutkit-captions.ass,format=yuv420p"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1109,7 +1158,7 @@ mod tests {
         assert!(w.tracks[2].clips.is_empty(), "audio dirender terpisah");
         assert!(!w.captions.enabled);
         // Gerak logo melanjutkan dari frame ke-90 dari 6000, bukan mulai dari awal.
-        let (_, filter, _) = build_pass(&w, &Pass { video: true, audio: false, loudnorm: false, ass: None, filter_file: "x".into(), ass_file: "y".into(), duration: 7.0 }).unwrap();
+        let (_, filter, _) = build_pass(&w, &Pass { video: true, audio: false, loudnorm: false, ass: None, filter_file: "x".into(), ass_file: "y".into(), duration: 7.0, fonts: vec![] }).unwrap();
         assert!(filter.contains("zoompan=z='1+0.2*min((on+90)/5999,1)'"), "{filter}");
     }
 

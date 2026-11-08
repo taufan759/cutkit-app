@@ -76,6 +76,13 @@ fn models_dir(args: &Args) -> PathBuf {
     cutkit_core::paths::models_dir()
 }
 
+/// Font caption bawaan: <app>/fonts (terpasang) atau ui/fonts di repo (target/release/../../ui/fonts).
+fn fonts_dir(args: &Args) -> String {
+    let exe_dir = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)).unwrap_or_default();
+    let c = [app_dir(args).join("fonts"), exe_dir.join("..").join("..").join("ui").join("fonts")];
+    cutkit_core::paths::find_fonts_dir(&c).map(|d| d.to_string_lossy().to_string()).unwrap_or_default()
+}
+
 fn progress(pct: f64, what: &str) {
     eprintln!("PROGRESS {pct:.1} {what}");
 }
@@ -124,7 +131,7 @@ fn run(args: Args) -> Result<Value, String> {
                 Some("best") => Quality::Best,
                 _ => Quality::Balanced,
             };
-            let opts = ExportOptions { output: out.clone(), encoder: if args.has("qsv") { Encoder::Qsv } else { Encoder::X264 }, quality, normalize_loudness: args.has("loudnorm") };
+            let opts = ExportOptions { output: out.clone(), encoder: if args.has("qsv") { Encoder::Qsv } else { Encoder::X264 }, quality, normalize_loudness: args.has("loudnorm"), fonts_dir: fonts_dir(&args) };
             let job = build_job(&project, &opts)?;
             let work = std::env::temp_dir().join("cutkit-cli").join(format!("{}", std::process::id()));
             let start = std::time::Instant::now();
@@ -138,7 +145,7 @@ fn run(args: Args) -> Result<Value, String> {
             let t: f64 = t.parse().map_err(|_| format!("Detik tidak valid: {t}"))?;
             let tools = tools()?;
             let project = Project::from_json(&std::fs::read_to_string(proj).map_err(|e| e.to_string())?)?;
-            let job = build_frame(&project, t, out, args.num("height", 720.0) as u32)?;
+            let job = build_frame(&project, t, out, args.num("height", 720.0) as u32, &fonts_dir(&args))?;
             let work = std::env::temp_dir().join("cutkit-cli-frame").join(format!("{}", std::process::id()));
             let r = ffmpeg::run_job(&tools.ffmpeg, &work, &job, Arc::new(AtomicBool::new(false)), |_| {});
             let _ = std::fs::remove_dir_all(&work);
