@@ -2,9 +2,25 @@
 
 Editor video desktop yang ringan untuk **Shorts 9:16 maupun video YouTube panjang 16:9/4K**: potong, susun, transisi, efek, filter warna, keyframe, musik, SFX, meme, stiker, teks judul, caption kata-per-kata otomatis dari suara, TTS, dan hapus background, lalu ekspor MP4. Semua diproses di komputermu dengan ffmpeg dan model AI lokal; internet hanya dipakai sekali untuk mengunduh model yang kamu pilih.
 
-Dibangun dengan [Tauri 2](https://tauri.app) (Rust + WebView2 bawaan Windows) dan UI HTML/CSS/JS polos tanpa framework, jadi aplikasinya kecil dan tetap enteng di laptop tanpa GPU khusus.
+Jalan di **Windows, macOS (Apple silicon dan Intel), dan Linux**. Dibangun dengan [Tauri 2](https://tauri.app) (Rust + webview bawaan sistem) dan UI HTML/CSS/JS polos tanpa framework, jadi aplikasinya kecil dan tetap enteng di laptop tanpa GPU khusus.
 
 ## Pasang (untuk pemula)
+
+Semua installer ada di halaman [Releases](https://github.com/taufan759/cutkit-app/releases/latest), lengkap dengan file `.sha256`.
+
+| OS | File | Catatan |
+|---|---|---|
+| Windows 10/11 | `cutkit-setup-<versi>.exe` | Wizard pemasangan, lihat langkah di bawah |
+| macOS 11+ | `CutKit_<versi>_universal.dmg` | Buka dmg, seret CutKit ke Applications. Bila macOS menolak membuka aplikasi yang belum ditandatangani: `xattr -dr com.apple.quarantine /Applications/CutKit.app` |
+| Linux (Ubuntu/Debian) | `CutKit_<versi>_amd64.deb` | `sudo apt install ./CutKit_<versi>_amd64.deb` |
+| Linux (distro lain) | `CutKit_<versi>_amd64.AppImage` | `chmod +x CutKit_*.AppImage` lalu jalankan |
+
+Di macOS dan Linux, kebutuhan lain disiapkan dari dalam aplikasi (menu **Proyek → Cek sistem & ffmpeg**):
+
+- **ffmpeg**: macOS memakai Homebrew (`brew install ffmpeg-full`, sudah termasuk caption dan auto caption). Linux mengunduh build statis ffmpeg terbaru dari BtbN ke folder data CutKit, tanpa sudo dan dicek SHA-256.
+- **Model AI, TTS Piper, hapus background, dan Hubungkan ke Claude**: sama seperti di Windows. Data disimpan di `~/Library/Application Support/io.github.taufan759.cutkit` (macOS) atau `~/.local/share/io.github.taufan759.cutkit` (Linux).
+
+### Windows
 
 1. Unduh **`cutkit-setup-<versi>.exe`** dari halaman [Releases](https://github.com/taufan759/cutkit-app/releases/latest).
 2. Jalankan file itu. Kalau muncul layar biru **"Windows protected your PC"**, klik **More info → Run anyway**. Ini muncul karena installer belum ditandatangani sertifikat berbayar, bukan karena berbahaya. Kode lengkapnya ada di repo ini.
@@ -242,7 +258,11 @@ Fitur-fitur CutKit (kecepatan, Ken Burns, latar blur, chroma key, loudness, anim
 - Teks dan caption selalu berada di atas gambar/video (sama di preview dan ekspor).
 - Volume di atas 100% hanya terdengar di hasil ekspor; preview dibatasi 100%.
 - GIF animasi diputar satu kali; duplikat klipnya untuk mengulang.
-- Font harus terpasang di Windows. Preview dan ekspor memakai font yang sama, tapi tebal tepi bisa beda tipis.
+- Font harus terpasang di sistem. Preview dan ekspor memakai font yang sama, tapi tebal tepi bisa beda tipis. Font Windows seperti Impact belum tentu ada di macOS/Linux; caption lalu memakai font pengganti.
+- macOS dan Linux sudah dites otomatis di GitHub Actions (tes unit, ekspor sungguhan, server MCP), tapi belum dicoba manual di perangkat asli. Build Mac belum ditandatangani Apple.
+- Auto caption butuh ffmpeg dengan filter whisper: ada di build Gyan (Windows) dan ffmpeg-full Homebrew (macOS). Build statis Linux bisa saja tanpa whisper; menu Cek sistem memberi tahu bila begitu.
+- Mesin TTS Piper resmi untuk macOS arm64 memakai biner Intel, jadi butuh Rosetta 2.
+- Belum ada versi Android/iOS: UI-nya dirancang untuk layar desktop, dan ffmpeg/Whisper/Piper perlu versi mobile.
 - Keyframe belum tersedia untuk klip teks (teks dirender libass); geser/skala teks tetap bisa diatur statis.
 - Pustaka efek, stiker, dan template bersifat lokal (bawaan + buatan sendiri), belum ada katalog online.
 - Hapus background video memproses tiap frame di CPU: klip 10 detik dengan model cepat butuh sekitar satu menit, model akurat lebih lama.

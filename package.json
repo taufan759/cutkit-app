@@ -1,7 +1,7 @@
 {
   "name": "cutkit-app",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "CutKit: editor video ringan untuk Shorts dan YouTube, offline di komputermu",
   "license": "MIT",
   "scripts": {
