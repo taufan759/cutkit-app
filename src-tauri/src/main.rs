@@ -449,6 +449,21 @@ async fn make_demo(dir: String, state: State<'_, AppState>) -> Result<cutkit_cor
     .await
 }
 
+/// Membuat bank aset CutKit (SFX, musik, latar, overlay) yang belum ada. Progres lewat event
+/// `bank-progress` (selesai, total, label). Mengembalikan folder bank.
+#[tauri::command]
+async fn bank_prepare(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+    let tools = state.tools()?;
+    blocking(move || {
+        let dir = cutkit_core::bank::bank_dir();
+        cutkit_core::bank::prepare(&tools.ffmpeg, &dir, |done, total, label| {
+            let _ = app.emit("bank-progress", (done, total, label.to_string()));
+        })?;
+        Ok(dir.to_string_lossy().to_string())
+    })
+    .await
+}
+
 #[derive(Serialize)]
 struct ModelStatus {
     #[serde(flatten)]
@@ -785,6 +800,7 @@ fn main() {
             clear_cache,
             install_ffmpeg,
             make_demo,
+            bank_prepare,
             ai_models,
             set_models_dir,
             ai_download,

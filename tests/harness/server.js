@@ -154,6 +154,12 @@ const commands = {
   open_path: () => null,
   reveal_path: () => null,
   launch_project: () => null,
+  bank_prepare: () => {
+    const dir = path.join(CACHE, "bank");
+    const cli = path.resolve(__dirname, "../../target/release", process.platform === "win32" ? "cutkit-cli.exe" : "cutkit-cli");
+    execFileSync(cli, ["bank", "make", "--dir", dir]);
+    return dir;
+  },
   // MCP: status klien disimulasikan di memori; config Claude asli tidak disentuh.
   mcp_info: () => {
     const server = path.resolve(__dirname, "../../mcp/server.js").replace(/\\/g, "/");

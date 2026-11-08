@@ -7,6 +7,7 @@ const { timeline: TL, captions: CAP, geometry: GEO, el, fmtTime } = window.CK;
 const LIBRARY_PLACES = [
   { name: "Meme Templates", path: "D:\\Master\\Pictures\\Meme Templates" },
   { name: "Sound Effect Meme", path: "D:\\Master\\Music\\Sound Effect Meme" },
+  { name: "Bank Flow", path: "D:\\Master\\Videos\\Bank Flow" },
 ];
 const FONTS = ["Impact", "Arial Black", "Arial", "Segoe UI", "Segoe UI Black", "Bahnschrift", "Verdana", "Tahoma", "Trebuchet MS", "Georgia", "Comic Sans MS", "Consolas"];
 const VIDEO_EXT = ["mp4", "mov", "mkv", "webm", "avi", "m4v", "gif", "wmv", "flv", "ts", "mts", "3gp"];
@@ -698,8 +699,11 @@ function dropAsset(asset, target) {
 function renderLibraryPlaces() {
   const custom = (() => { try { return JSON.parse(localStorage.getItem("cutkit.libplaces") || "[]"); } catch { return []; } })();
   const places = [...LIBRARY_PLACES, ...custom];
+  const bank = el("button", { class: "btn small" + (state.lib.bank ? " primary" : ""), title: "SFX, musik, latar, dan overlay buatan CutKit (bebas dipakai, CC0)" }, "🎁 Bank CutKit");
+  bank.addEventListener("click", openBank);
   $("#lib-places").replaceChildren(
-    ...places.map((pl) => el("button", { class: "btn small" + (state.lib.root === pl.path ? " primary" : ""), title: pl.path, onclick: () => openLibrary(pl.path, pl.path) }, pl.name)),
+    bank,
+    ...places.map((pl) => el("button", { class: "btn small" + (!state.lib.bank && state.lib.root === pl.path ? " primary" : ""), title: pl.path, onclick: () => openLibrary(pl.path, pl.path) }, pl.name)),
     el("button", { class: "btn small ghost", onclick: async () => {
       const dir = await tauri.dialog.open({ directory: true });
       if (!dir) return;
@@ -710,10 +714,29 @@ function renderLibraryPlaces() {
     } }, "＋ Folder…"));
 }
 
-async function openLibrary(dir, root) {
+/** Bank aset buatan CutKit: dibuat sekali (sekitar 40 detik) lalu dibuka seperti folder pustaka. */
+async function openBank() {
+  const grid = $("#lib-grid");
+  const status = el("p", { class: "hint" }, "Menyiapkan bank aset…");
+  const bar = el("div");
+  grid.replaceChildren(status, el("div", { class: "progress" }, bar));
+  const un = await tauri.event.listen("bank-progress", (ev) => {
+    const [done, total, label] = ev.payload;
+    if (total) { status.textContent = `Membuat bank aset (sekali saja): ${label} · ${done}/${total}`; bar.style.width = `${(done / total) * 100}%`; }
+  });
+  try {
+    const dir = await invoke("bank_prepare");
+    await openLibrary(dir, dir, true);
+  } catch (e) {
+    grid.replaceChildren(el("p", { class: "hint" }, errMsg(e)));
+  } finally { un(); }
+}
+
+async function openLibrary(dir, root, bank) {
   try {
     const entries = await invoke("list_dir", { path: dir });
-    state.lib = { dir, root: root || state.lib.root || dir, entries, filter: "", shown: LIB_PAGE };
+    const inBank = bank || (state.lib.bank && dir.startsWith(state.lib.root || ""));
+    state.lib = { dir, root: root || state.lib.root || dir, entries, filter: "", shown: LIB_PAGE, bank: inBank };
     $("#lib-search").value = "";
     localStorage.setItem("cutkit.libdir", JSON.stringify({ dir, root: state.lib.root }));
     renderLibraryPlaces();
