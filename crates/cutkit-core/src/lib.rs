@@ -2,6 +2,7 @@
 //! Tidak bergantung pada Tauri sehingga semua logika bisa diuji dengan `cargo test`.
 
 pub mod ai;
+pub mod bank;
 pub mod ass;
 pub mod beats;
 pub mod color;

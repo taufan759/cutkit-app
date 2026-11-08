@@ -478,3 +478,28 @@ fn every_transition_renders() {
         }
     }
 }
+
+#[test]
+fn asset_bank_generates_every_item() {
+    let Some(tools) = find_tools(None) else {
+        eprintln!("ffmpeg tidak ditemukan, tes bank aset dilewati");
+        return;
+    };
+    let dir = tmp_dir("bank");
+    let made = cutkit_core::bank::prepare(&tools.ffmpeg, &dir, |_, _, _| {}).expect("bank dibuat");
+    assert_eq!(made, cutkit_core::bank::ITEMS.len());
+    for item in cutkit_core::bank::ITEMS {
+        let p = cutkit_core::bank::path_of(&dir, item);
+        let info = probe(&tools.ffprobe, &p.to_string_lossy()).unwrap_or_else(|e| panic!("{}: {e}", item.file));
+        match item.category {
+            "SFX" | "Musik" => assert!(info.has_audio && info.duration > 0.05, "{} bersuara", item.file),
+            "Latar bergerak" => assert!(info.has_video && (info.duration - 6.0).abs() < 0.2 && info.width * 16 == info.height * 9, "{}: {:?}", item.file, (info.duration, info.width, info.height)),
+            _ => assert!(info.has_video && info.width * 16 == info.height * 9 && info.width >= 540, "{}: {}x{}", item.file, info.width, info.height),
+        }
+        if item.file.ends_with(".webm") {
+            assert!(info.alpha, "{} transparan", item.file);
+        }
+    }
+    let again = cutkit_core::bank::prepare(&tools.ffmpeg, &dir, |_, _, _| {}).unwrap();
+    assert_eq!(again, 0, "item yang sudah ada tidak dibuat ulang");
+}

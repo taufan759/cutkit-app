@@ -203,6 +203,29 @@ fn run(args: Args) -> Result<Value, String> {
             }
             Ok(json!({ "id": m.id, "installed": true, "models_dir": dir.to_string_lossy() }))
         }
+        "bank" => {
+            // Bank aset buatan CutKit: `bank` = daftar, `bank make [--dir D]` = buat yang belum ada.
+            let bank = args.get("dir").map(PathBuf::from).unwrap_or_else(cutkit_core::bank::bank_dir);
+            if args.pos.get(1).map(|s| s.as_str()) == Some("make") {
+                let t = tools()?;
+                let mut times = vec![];
+                let mut last = std::time::Instant::now();
+                let mut prev = String::new();
+                let made = cutkit_core::bank::prepare(&t.ffmpeg, &bank, |done, total, label| {
+                    if !prev.is_empty() {
+                        times.push(json!({ "item": prev, "seconds": (last.elapsed().as_secs_f64() * 10.0).round() / 10.0 }));
+                    }
+                    prev = label.to_string();
+                    last = std::time::Instant::now();
+                    progress(done as f64 * 100.0 / total.max(1) as f64, label);
+                })?;
+                return Ok(json!({ "dir": bank.to_string_lossy(), "made": made, "times": times }));
+            }
+            Ok(json!({
+                "dir": bank.to_string_lossy(),
+                "items": cutkit_core::bank::ITEMS.iter().map(|i| json!({ "category": i.category, "label": i.label, "path": cutkit_core::bank::path_of(&bank, i).to_string_lossy(), "ready": cutkit_core::bank::path_of(&bank, i).is_file() })).collect::<Vec<_>>(),
+            }))
+        }
         "setup" => setup(&args, &dir),
         "uninstall" => uninstall(&args, &dir),
         _ => Err(HELP.to_string()),
