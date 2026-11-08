@@ -45,7 +45,7 @@
       "hidden": false,
       "clips": [
         {
-          "id": "cmw4tenvo7wk",
+          "id": "cmw7oab5d7ri",
           "kind": "video",
           "asset_id": "utama",
           "start": 0,
@@ -87,6 +87,7 @@
             "temperature": 0,
             "lut": ""
           },
+          "keyframes": [],
           "text": null
         }
       ]
@@ -99,7 +100,7 @@
       "hidden": false,
       "clips": [
         {
-          "id": "cmw4tenvo834",
+          "id": "cmw7oab5d8m9",
           "kind": "image",
           "asset_id": "meme",
           "start": 2.5,
@@ -141,19 +142,20 @@
             "temperature": 0,
             "lut": ""
           },
+          "keyframes": [],
           "text": null
         }
       ]
     },
     {
-      "id": "vmw4tenvpdkj",
+      "id": "vmw7oab5ddi2",
       "kind": "video",
       "name": "Video 4",
       "muted": false,
       "hidden": false,
       "clips": [
         {
-          "id": "tmw4tenvpclk",
+          "id": "tmw7oab5dc6x",
           "kind": "text",
           "asset_id": null,
           "start": 2.5,
@@ -209,19 +211,20 @@
             "hue": 0,
             "temperature": 0,
             "lut": ""
-          }
+          },
+          "keyframes": []
         }
       ]
     },
     {
-      "id": "vmw4tenvoagf",
+      "id": "vmw7oab5daqp",
       "kind": "video",
       "name": "Efek",
       "muted": false,
       "hidden": false,
       "clips": [
         {
-          "id": "emw4tenvob7s",
+          "id": "emw7oab5dbva",
           "kind": "effect",
           "asset_id": null,
           "start": 2.5,
@@ -267,6 +270,7 @@
             "temperature": 0,
             "lut": ""
           },
+          "keyframes": [],
           "text": null
         }
       ],
@@ -280,7 +284,7 @@
       "hidden": false,
       "clips": [
         {
-          "id": "cmw4tenvo92d",
+          "id": "cmw7oab5d92",
           "kind": "audio",
           "asset_id": "sfx",
           "start": 2.5,
@@ -322,6 +326,7 @@
             "temperature": 0,
             "lut": ""
           },
+          "keyframes": [],
           "text": null
         }
       ]

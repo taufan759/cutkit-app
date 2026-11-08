@@ -76,5 +76,28 @@ const yellow = { font: "Impact", color: "#ffffff", highlight_color: "#ffe600", o
   save("intro-youtube.json", p, { name: "Intro YouTube 16:9", description: "Klip pembuka dengan zoom pelan, letterbox sinematik, judul besar, musik pelan, subtitle gaya YouTube.", labels: { klip: "Video pembuka", musik: "Musik" } });
 }
 
+// 4. Carousel 5 slide (feed 4:5): satu gambar latar per slide, judul, tiga poin, dan ajakan di slide terakhir.
+//    Diekspor lewat Proyek > Ekspor carousel (tiap klip di track utama = satu gambar).
+{
+  const p = T.newProject("Carousel 5 slide", "4:5");
+  const bgs = [1, 2, 3, 4, 5].map((n) => ({ id: `s${n}`, kind: "image", width: 1080, height: 1350, has_video: true }));
+  p.assets.push(...bgs);
+  bgs.forEach((a) => T.insertClip(p, "v1", T.clipFromAsset(a, { fit: "cover", duration: 1 })));
+  const big = { font: "Anton", size: 160, color: "#ffffff", outline_color: "#000000", outline: 6, shadow: 3 };
+  const body = { font: "Poppins", bold: true, size: 70, color: "#ffffff", outline_color: "#000000", outline: 4, shadow: 2 };
+  const texts = [
+    [0, "JUDUL CAROUSEL", -120, big], [0, "Geser untuk lihat →", 330, { ...body, size: 54 }],
+    [1, "1. POIN PERTAMA", -300, { ...big, size: 120 }], [1, "Penjelasan singkat\npoin pertama di sini.", 60, body],
+    [2, "2. POIN KEDUA", -300, { ...big, size: 120 }], [2, "Penjelasan singkat\npoin kedua di sini.", 60, body],
+    [3, "3. POIN KETIGA", -300, { ...big, size: 120 }], [3, "Penjelasan singkat\npoin ketiga di sini.", 60, body],
+    [4, "SIMPAN & FOLLOW", -120, { ...big, color: "#ffe600" }], [4, "untuk tips berikutnya", 140, body],
+  ];
+  for (const [slide, text, y, style] of texts) {
+    const t = T.textClip(text, { y, duration: 1, style });
+    T.insertClip(p, T.trackFor(p, t, slide).id, t, slide);
+  }
+  save("carousel-5-slide.json", p, { name: "Carousel 5 slide", description: "Feed 4:5: judul, tiga poin, dan ajakan simpan & follow. Ekspor lewat Proyek > Ekspor carousel.", labels: { s1: "Latar slide 1", s2: "Latar slide 2", s3: "Latar slide 3", s4: "Latar slide 4", s5: "Latar slide 5" } });
+}
+
 fs.writeFileSync(path.join(out, "index.json"), JSON.stringify(index, null, 2) + "\n");
 console.log(`${index.length} template ditulis ke ${out}`);

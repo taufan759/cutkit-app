@@ -4,7 +4,7 @@
 
 use cutkit_core::ai;
 use cutkit_core::ffmpeg::{self, find_tools};
-use cutkit_core::{build_frame, build_job, Encoder, ExportOptions, Project, Quality};
+use cutkit_core::{build_frame, build_job, export::carousel_times, Encoder, ExportOptions, Project, Quality};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -16,6 +16,7 @@ const HELP: &str = "cutkit-cli <perintah> [argumen]
   probe <file>...                        info media
   export <proyek.json> <hasil.mp4> [--quality fast|balanced|best] [--qsv] [--loudnorm]
   frame <proyek.json> <detik> <hasil.png> [--height 720]   satu frame hasil ekspor
+  carousel <proyek.json> <folder> [--format png|jpg]      tiap klip track utama jadi satu slide gambar
   transcribe <file> [--start s] [--duration d] [--model whisper-small] [--lang id] [--vad]
   tts <hasil.wav> (--text \"...\" | --text-file f) [--speed 1] [--gap 0.3]
   beats <file>                           tempo dan ketukan musik
@@ -74,6 +75,29 @@ fn models_dir(args: &Args) -> PathBuf {
         return PathBuf::from(d);
     }
     cutkit_core::paths::models_dir()
+}
+
+/// Mengekspor slide carousel ke `dir` (slide-01.png, ...), ukuran penuh kanvas.
+fn export_carousel(ffmpeg_path: &str, project: &Project, dir: &Path, format: &str, fonts: &str, mut on_progress: impl FnMut(usize, usize)) -> Result<Vec<String>, String> {
+    let times = carousel_times(project);
+    if times.is_empty() {
+        return Err("Track utama kosong: taruh satu gambar/klip per slide di track video utama.".into());
+    }
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let ext = if format.eq_ignore_ascii_case("jpg") || format.eq_ignore_ascii_case("jpeg") { "jpg" } else { "png" };
+    let mut out = vec![];
+    for (i, t) in times.iter().enumerate() {
+        on_progress(i, times.len());
+        let file = dir.join(format!("slide-{:02}.{ext}", i + 1));
+        let job = build_frame(project, *t, &file.to_string_lossy(), project.canvas.height, fonts)?;
+        let work = std::env::temp_dir().join("cutkit-cli-carousel").join(format!("{}-{i}", std::process::id()));
+        let r = ffmpeg::run_job(ffmpeg_path, &work, &job, Arc::new(AtomicBool::new(false)), |_| {});
+        let _ = std::fs::remove_dir_all(&work);
+        r?;
+        out.push(file.to_string_lossy().to_string());
+    }
+    on_progress(times.len(), times.len());
+    Ok(out)
 }
 
 /// Font caption bawaan: <app>/fonts (terpasang) atau ui/fonts di repo (target/release/../../ui/fonts).
@@ -151,6 +175,13 @@ fn run(args: Args) -> Result<Value, String> {
             let _ = std::fs::remove_dir_all(&work);
             r?;
             Ok(json!({ "output": out, "time": t, "duration": project.duration() }))
+        }
+        "carousel" => {
+            let (proj, dir_out) = (args.pos.get(1).ok_or("Butuh file proyek")?, args.pos.get(2).ok_or("Butuh folder hasil")?);
+            let tools = tools()?;
+            let project = Project::from_json(&std::fs::read_to_string(proj).map_err(|e| e.to_string())?)?;
+            let files = export_carousel(&tools.ffmpeg, &project, Path::new(dir_out), args.get("format").unwrap_or("png"), &fonts_dir(&args), |n, total| progress(n as f64 * 100.0 / total.max(1) as f64, "slide"))?;
+            Ok(json!({ "slides": files }))
         }
         "transcribe" => {
             let file = args.pos.get(1).ok_or("Butuh file audio/video")?;

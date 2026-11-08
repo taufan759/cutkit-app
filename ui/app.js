@@ -2394,6 +2394,7 @@ function wire() {
     else if (cmd === "system") systemDialog();
     else if (cmd === "demo") demoProject();
     else if (cmd === "mcp") mcpDialog();
+    else if (cmd === "carousel") carouselDialog();
   });
 
   const canvas = $("#preview");
@@ -2482,6 +2483,34 @@ function wire() {
     });
   }
   document.fonts && document.fonts.ready.then(() => { window.CK.text.resetFonts(); preview.invalidate(); });
+}
+
+/* ---------- carousel: tiap klip di track utama jadi satu gambar ---------- */
+
+async function carouselDialog() {
+  const p = state.project;
+  const main = p.tracks.find((t) => t.kind === "video" && t.role !== "effects");
+  const n = main ? main.clips.filter((c) => c.kind !== "effect").length : 0;
+  const fmt = el("select", {}, el("option", { value: "png" }, "PNG (tajam, untuk teks)"), el("option", { value: "jpg" }, "JPG (lebih kecil)"));
+  const go = el("button", { class: "btn primary", disabled: !n }, `Ekspor ${n} slide`);
+  const status = el("p", { class: "hint" }, n
+    ? `Setiap klip di track utama jadi satu gambar ${p.canvas.width}×${p.canvas.height}, lengkap dengan teks, caption, stiker, dan efeknya. Untuk Instagram pakai rasio 4:5 atau 1:1.`
+    : "Track utama masih kosong. Taruh satu gambar atau klip per slide di track utama (atau mulai dari template Carousel 5 slide).");
+  go.addEventListener("click", async () => {
+    const dir = await tauri.dialog.open({ directory: true, title: "Pilih folder untuk slide carousel" });
+    if (!dir) return;
+    go.disabled = true;
+    const un = await tauri.event.listen("carousel-progress", (ev) => { const [done, total] = ev.payload; go.textContent = `Membuat slide ${Math.min(done + 1, total)}/${total}…`; });
+    try {
+      const files = await invoke("export_carousel", { project: p, dir, format: fmt.value });
+      closeModal();
+      toast(`${files.length} slide tersimpan di ${dir}.`);
+      invoke("reveal_path", { path: files[0] }).catch(() => {});
+    } catch (e) { toast(errMsg(e), true); go.disabled = false; go.textContent = `Ekspor ${n} slide`; }
+    finally { un(); }
+  });
+  openModal(el("h2", {}, "🖼 Ekspor carousel"), status, field("Format", fmt),
+    el("div", { class: "modal-actions" }, el("button", { class: "btn", onclick: closeModal }, "Batal"), go));
 }
 
 /* ---------- MCP: CutKit dipakai lewat Claude ---------- */

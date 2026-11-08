@@ -19,5 +19,12 @@
     "description": "Klip pembuka dengan zoom pelan, letterbox sinematik, judul besar, musik pelan, subtitle gaya YouTube.",
     "ratio": "1920×1080",
     "duration": 8
+  },
+  {
+    "file": "carousel-5-slide.json",
+    "name": "Carousel 5 slide",
+    "description": "Feed 4:5: judul, tiga poin, dan ajakan simpan & follow. Ekspor lewat Proyek > Ekspor carousel.",
+    "ratio": "1080×1350",
+    "duration": 5
   }
 ]

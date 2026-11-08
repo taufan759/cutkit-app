@@ -36,7 +36,7 @@
       "hidden": false,
       "clips": [
         {
-          "id": "cmw4tenvqerv",
+          "id": "cmw7oab5eeju",
           "kind": "video",
           "asset_id": "klip",
           "start": 0,
@@ -78,6 +78,7 @@
             "temperature": 0,
             "lut": ""
           },
+          "keyframes": [],
           "text": null
         }
       ]
@@ -90,7 +91,7 @@
       "hidden": false,
       "clips": [
         {
-          "id": "tmw4tenvqg80",
+          "id": "tmw7oab5eg6a",
           "kind": "text",
           "asset_id": null,
           "start": 0.5,
@@ -146,19 +147,20 @@
             "hue": 0,
             "temperature": 0,
             "lut": ""
-          }
+          },
+          "keyframes": []
         }
       ]
     },
     {
-      "id": "vmw4tenvqhtm",
+      "id": "vmw7oab5eh6q",
       "kind": "video",
       "name": "Efek",
       "muted": false,
       "hidden": false,
       "clips": [
         {
-          "id": "emw4tenvqi31",
+          "id": "emw7oab5ei4t",
           "kind": "effect",
           "asset_id": null,
           "start": 0,
@@ -204,6 +206,7 @@
             "temperature": 0,
             "lut": ""
           },
+          "keyframes": [],
           "text": null
         }
       ],
@@ -217,7 +220,7 @@
       "hidden": false,
       "clips": [
         {
-          "id": "cmw4tenvqfah",
+          "id": "cmw7oab5efzx",
           "kind": "audio",
           "asset_id": "musik",
           "start": 0,
@@ -259,6 +262,7 @@
             "temperature": 0,
             "lut": ""
           },
+          "keyframes": [],
           "text": null
         }
       ]

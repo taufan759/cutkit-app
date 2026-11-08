@@ -366,6 +366,38 @@ fn export_cancel(state: State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Ekspor carousel: tiap klip di track utama jadi satu gambar ukuran penuh di `dir`.
+/// Progres lewat event `carousel-progress` (selesai, total).
+#[tauri::command]
+async fn export_carousel(app: AppHandle, project: Project, dir: String, format: String, state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let tools = state.tools()?;
+    let fonts = fonts_dir(&app);
+    let cache = state.cache_dir.clone();
+    blocking(move || {
+        let times = cutkit_core::export::carousel_times(&project);
+        if times.is_empty() {
+            return Err("Track utama kosong: taruh satu gambar/klip per slide di track video utama.".into());
+        }
+        let dir = PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let ext = if format == "jpg" { "jpg" } else { "png" };
+        let mut out = vec![];
+        for (i, t) in times.iter().enumerate() {
+            let _ = app.emit("carousel-progress", (i, times.len()));
+            let file = dir.join(format!("slide-{:02}.{ext}", i + 1));
+            let job = cutkit_core::build_frame(&project, *t, &file.to_string_lossy(), project.canvas.height, &fonts)?;
+            let work = cache.join("carousel").join(format!("{i}"));
+            let r = ffmpeg::run_job(&tools.ffmpeg, &work, &job, Arc::new(AtomicBool::new(false)), |_| {});
+            let _ = std::fs::remove_dir_all(&work);
+            r?;
+            out.push(file.to_string_lossy().to_string());
+        }
+        let _ = app.emit("carousel-progress", (times.len(), times.len()));
+        Ok(out)
+    })
+    .await
+}
+
 /// Font caption bawaan (OFL): folder resource aplikasi terpasang, atau ui/fonts saat pengembangan.
 fn fonts_dir(app: &AppHandle) -> String {
     let mut c = vec![];
@@ -816,6 +848,7 @@ fn main() {
             install_ffmpeg,
             make_demo,
             bank_prepare,
+            export_carousel,
             ai_models,
             set_models_dir,
             ai_download,

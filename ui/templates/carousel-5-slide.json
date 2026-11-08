@@ -1,0 +1,951 @@
+{
+  "version": 1,
+  "canvas": {
+    "width": 1080,
+    "height": 1350,
+    "fps": 30,
+    "background": "#000000"
+  },
+  "assets": [
+    {
+      "id": "s1",
+      "kind": "image",
+      "width": 1080,
+      "height": 1350,
+      "has_video": true,
+      "slot": true,
+      "label": "Latar slide 1"
+    },
+    {
+      "id": "s2",
+      "kind": "image",
+      "width": 1080,
+      "height": 1350,
+      "has_video": true,
+      "slot": true,
+      "label": "Latar slide 2"
+    },
+    {
+      "id": "s3",
+      "kind": "image",
+      "width": 1080,
+      "height": 1350,
+      "has_video": true,
+      "slot": true,
+      "label": "Latar slide 3"
+    },
+    {
+      "id": "s4",
+      "kind": "image",
+      "width": 1080,
+      "height": 1350,
+      "has_video": true,
+      "slot": true,
+      "label": "Latar slide 4"
+    },
+    {
+      "id": "s5",
+      "kind": "image",
+      "width": 1080,
+      "height": 1350,
+      "has_video": true,
+      "slot": true,
+      "label": "Latar slide 5"
+    }
+  ],
+  "tracks": [
+    {
+      "id": "v1",
+      "kind": "video",
+      "name": "Video utama",
+      "muted": false,
+      "hidden": false,
+      "clips": [
+        {
+          "id": "cmw7oab5fji8",
+          "kind": "image",
+          "asset_id": "s1",
+          "start": 0,
+          "duration": 1,
+          "in": 0,
+          "fit": "cover",
+          "transform": {
+            "x": 0,
+            "y": 0,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1
+          },
+          "speed": 1,
+          "volume": 1,
+          "muted": false,
+          "fade_in": 0,
+          "fade_out": 0,
+          "motion": {
+            "kind": "none",
+            "amount": 0.15
+          },
+          "background": "none",
+          "chroma": {
+            "enabled": false,
+            "color": "#00ff00",
+            "similarity": 0.3,
+            "blend": 0.1
+          },
+          "transition": {
+            "kind": "none",
+            "duration": 0.5
+          },
+          "color": {
+            "brightness": 1,
+            "contrast": 1,
+            "saturation": 1,
+            "hue": 0,
+            "temperature": 0,
+            "lut": ""
+          },
+          "keyframes": [],
+          "text": null
+        },
+        {
+          "id": "cmw7oab5fkzf",
+          "kind": "image",
+          "asset_id": "s2",
+          "start": 1,
+          "duration": 1,
+          "in": 0,
+          "fit": "cover",
+          "transform": {
+            "x": 0,
+            "y": 0,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1
+          },
+          "speed": 1,
+          "volume": 1,
+          "muted": false,
+          "fade_in": 0,
+          "fade_out": 0,
+          "motion": {
+            "kind": "none",
+            "amount": 0.15
+          },
+          "background": "none",
+          "chroma": {
+            "enabled": false,
+            "color": "#00ff00",
+            "similarity": 0.3,
+            "blend": 0.1
+          },
+          "transition": {
+            "kind": "none",
+            "duration": 0.5
+          },
+          "color": {
+            "brightness": 1,
+            "contrast": 1,
+            "saturation": 1,
+            "hue": 0,
+            "temperature": 0,
+            "lut": ""
+          },
+          "keyframes": [],
+          "text": null
+        },
+        {
+          "id": "cmw7oab5flg3",
+          "kind": "image",
+          "asset_id": "s3",
+          "start": 2,
+          "duration": 1,
+          "in": 0,
+          "fit": "cover",
+          "transform": {
+            "x": 0,
+            "y": 0,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1
+          },
+          "speed": 1,
+          "volume": 1,
+          "muted": false,
+          "fade_in": 0,
+          "fade_out": 0,
+          "motion": {
+            "kind": "none",
+            "amount": 0.15
+          },
+          "background": "none",
+          "chroma": {
+            "enabled": false,
+            "color": "#00ff00",
+            "similarity": 0.3,
+            "blend": 0.1
+          },
+          "transition": {
+            "kind": "none",
+            "duration": 0.5
+          },
+          "color": {
+            "brightness": 1,
+            "contrast": 1,
+            "saturation": 1,
+            "hue": 0,
+            "temperature": 0,
+            "lut": ""
+          },
+          "keyframes": [],
+          "text": null
+        },
+        {
+          "id": "cmw7oab5fmsi",
+          "kind": "image",
+          "asset_id": "s4",
+          "start": 3,
+          "duration": 1,
+          "in": 0,
+          "fit": "cover",
+          "transform": {
+            "x": 0,
+            "y": 0,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1
+          },
+          "speed": 1,
+          "volume": 1,
+          "muted": false,
+          "fade_in": 0,
+          "fade_out": 0,
+          "motion": {
+            "kind": "none",
+            "amount": 0.15
+          },
+          "background": "none",
+          "chroma": {
+            "enabled": false,
+            "color": "#00ff00",
+            "similarity": 0.3,
+            "blend": 0.1
+          },
+          "transition": {
+            "kind": "none",
+            "duration": 0.5
+          },
+          "color": {
+            "brightness": 1,
+            "contrast": 1,
+            "saturation": 1,
+            "hue": 0,
+            "temperature": 0,
+            "lut": ""
+          },
+          "keyframes": [],
+          "text": null
+        },
+        {
+          "id": "cmw7oab5fna0",
+          "kind": "image",
+          "asset_id": "s5",
+          "start": 4,
+          "duration": 1,
+          "in": 0,
+          "fit": "cover",
+          "transform": {
+            "x": 0,
+            "y": 0,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1
+          },
+          "speed": 1,
+          "volume": 1,
+          "muted": false,
+          "fade_in": 0,
+          "fade_out": 0,
+          "motion": {
+            "kind": "none",
+            "amount": 0.15
+          },
+          "background": "none",
+          "chroma": {
+            "enabled": false,
+            "color": "#00ff00",
+            "similarity": 0.3,
+            "blend": 0.1
+          },
+          "transition": {
+            "kind": "none",
+            "duration": 0.5
+          },
+          "color": {
+            "brightness": 1,
+            "contrast": 1,
+            "saturation": 1,
+            "hue": 0,
+            "temperature": 0,
+            "lut": ""
+          },
+          "keyframes": [],
+          "text": null
+        }
+      ]
+    },
+    {
+      "id": "v2",
+      "kind": "video",
+      "name": "Overlay",
+      "muted": false,
+      "hidden": false,
+      "clips": [
+        {
+          "id": "tmw7oab5fon0",
+          "kind": "text",
+          "asset_id": null,
+          "start": 0,
+          "duration": 1,
+          "transform": {
+            "x": 0,
+            "y": -120,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1
+          },
+          "text": {
+            "text": "JUDUL CAROUSEL",
+            "style": {
+              "font": "Anton",
+              "size": 160,
+              "color": "#ffffff",
+              "outline_color": "#000000",
+              "outline": 6,
+              "shadow": 3,
+              "bold": false,
+              "italic": false,
+              "background": "",
+              "align": "center"
+            }
+          },
+          "in": 0,
+          "speed": 1,
+          "volume": 1,
+          "muted": false,
+          "fade_in": 0,
+          "fade_out": 0,
+          "fit": "contain",
+          "motion": {
+            "kind": "none",
+            "amount": 0.15
+          },
+          "background": "none",
+          "chroma": {
+            "enabled": false,
+            "color": "#00ff00",
+            "similarity": 0.3,
+            "blend": 0.1
+          },
+          "transition": {
+            "kind": "none",
+            "duration": 0.5
+          },
+          "color": {
+            "brightness": 1,
+            "contrast": 1,
+            "saturation": 1,
+            "hue": 0,
+            "temperature": 0,
+            "lut": ""
+          },
+          "keyframes": []
+        },
+        {
+          "id": "tmw7oab5frmq",
+          "kind": "text",
+          "asset_id": null,
+          "start": 1,
+          "duration": 1,
+          "transform": {
+            "x": 0,
+            "y": -300,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1
+          },
+          "text": {
+            "text": "1. POIN PERTAMA",
+            "style": {
+              "font": "Anton",
+              "size": 120,
+              "color": "#ffffff",
+              "outline_color": "#000000",
+              "outline": 6,
+              "shadow": 3,
+              "bold": false,
+              "italic": false,
+              "background": "",
+              "align": "center"
+            }
+          },
+          "in": 0,
+          "speed": 1,
+          "volume": 1,
+          "muted": false,
+          "fade_in": 0,
+          "fade_out": 0,
+          "fit": "contain",
+          "motion": {
+            "kind": "none",
+            "amount": 0.15
+          },
+          "background": "none",
+          "chroma": {
+            "enabled": false,
+            "color": "#00ff00",
+            "similarity": 0.3,
+            "blend": 0.1
+          },
+          "transition": {
+            "kind": "none",
+            "duration": 0.5
+          },
+          "color": {
+            "brightness": 1,
+            "contrast": 1,
+            "saturation": 1,
+            "hue": 0,
+            "temperature": 0,
+            "lut": ""
+          },
+          "keyframes": []
+        },
+        {
+          "id": "tmw7oab5fto5",
+          "kind": "text",
+          "asset_id": null,
+          "start": 2,
+          "duration": 1,
+          "transform": {
+            "x": 0,
+            "y": -300,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1
+          },
+          "text": {
+            "text": "2. POIN KEDUA",
+            "style": {
+              "font": "Anton",
+              "size": 120,
+              "color": "#ffffff",
+              "outline_color": "#000000",
+              "outline": 6,
+              "shadow": 3,
+              "bold": false,
+              "italic": false,
+              "background": "",
+              "align": "center"
+            }
+          },
+          "in": 0,
+          "speed": 1,
+          "volume": 1,
+          "muted": false,
+          "fade_in": 0,
+          "fade_out": 0,
+          "fit": "contain",
+          "motion": {
+            "kind": "none",
+            "amount": 0.15
+          },
+          "background": "none",
+          "chroma": {
+            "enabled": false,
+            "color": "#00ff00",
+            "similarity": 0.3,
+            "blend": 0.1
+          },
+          "transition": {
+            "kind": "none",
+            "duration": 0.5
+          },
+          "color": {
+            "brightness": 1,
+            "contrast": 1,
+            "saturation": 1,
+            "hue": 0,
+            "temperature": 0,
+            "lut": ""
+          },
+          "keyframes": []
+        },
+        {
+          "id": "tmw7oab5fv5r",
+          "kind": "text",
+          "asset_id": null,
+          "start": 3,
+          "duration": 1,
+          "transform": {
+            "x": 0,
+            "y": -300,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1
+          },
+          "text": {
+            "text": "3. POIN KETIGA",
+            "style": {
+              "font": "Anton",
+              "size": 120,
+              "color": "#ffffff",
+              "outline_color": "#000000",
+              "outline": 6,
+              "shadow": 3,
+              "bold": false,
+              "italic": false,
+              "background": "",
+              "align": "center"
+            }
+          },
+          "in": 0,
+          "speed": 1,
+          "volume": 1,
+          "muted": false,
+          "fade_in": 0,
+          "fade_out": 0,
+          "fit": "contain",
+          "motion": {
+            "kind": "none",
+            "amount": 0.15
+          },
+          "background": "none",
+          "chroma": {
+            "enabled": false,
+            "color": "#00ff00",
+            "similarity": 0.3,
+            "blend": 0.1
+          },
+          "transition": {
+            "kind": "none",
+            "duration": 0.5
+          },
+          "color": {
+            "brightness": 1,
+            "contrast": 1,
+            "saturation": 1,
+            "hue": 0,
+            "temperature": 0,
+            "lut": ""
+          },
+          "keyframes": []
+        },
+        {
+          "id": "tmw7oab5fxza",
+          "kind": "text",
+          "asset_id": null,
+          "start": 4,
+          "duration": 1,
+          "transform": {
+            "x": 0,
+            "y": -120,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1
+          },
+          "text": {
+            "text": "SIMPAN & FOLLOW",
+            "style": {
+              "font": "Anton",
+              "size": 160,
+              "color": "#ffe600",
+              "outline_color": "#000000",
+              "outline": 6,
+              "shadow": 3,
+              "bold": false,
+              "italic": false,
+              "background": "",
+              "align": "center"
+            }
+          },
+          "in": 0,
+          "speed": 1,
+          "volume": 1,
+          "muted": false,
+          "fade_in": 0,
+          "fade_out": 0,
+          "fit": "contain",
+          "motion": {
+            "kind": "none",
+            "amount": 0.15
+          },
+          "background": "none",
+          "chroma": {
+            "enabled": false,
+            "color": "#00ff00",
+            "similarity": 0.3,
+            "blend": 0.1
+          },
+          "transition": {
+            "kind": "none",
+            "duration": 0.5
+          },
+          "color": {
+            "brightness": 1,
+            "contrast": 1,
+            "saturation": 1,
+            "hue": 0,
+            "temperature": 0,
+            "lut": ""
+          },
+          "keyframes": []
+        }
+      ]
+    },
+    {
+      "id": "vmw7oab5fq7s",
+      "kind": "video",
+      "name": "Video 3",
+      "muted": false,
+      "hidden": false,
+      "clips": [
+        {
+          "id": "tmw7oab5fpzk",
+          "kind": "text",
+          "asset_id": null,
+          "start": 0,
+          "duration": 1,
+          "transform": {
+            "x": 0,
+            "y": 330,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1
+          },
+          "text": {
+            "text": "Geser untuk lihat →",
+            "style": {
+              "font": "Poppins",
+              "size": 54,
+              "color": "#ffffff",
+              "outline_color": "#000000",
+              "outline": 4,
+              "shadow": 2,
+              "bold": true,
+              "italic": false,
+              "background": "",
+              "align": "center"
+            }
+          },
+          "in": 0,
+          "speed": 1,
+          "volume": 1,
+          "muted": false,
+          "fade_in": 0,
+          "fade_out": 0,
+          "fit": "contain",
+          "motion": {
+            "kind": "none",
+            "amount": 0.15
+          },
+          "background": "none",
+          "chroma": {
+            "enabled": false,
+            "color": "#00ff00",
+            "similarity": 0.3,
+            "blend": 0.1
+          },
+          "transition": {
+            "kind": "none",
+            "duration": 0.5
+          },
+          "color": {
+            "brightness": 1,
+            "contrast": 1,
+            "saturation": 1,
+            "hue": 0,
+            "temperature": 0,
+            "lut": ""
+          },
+          "keyframes": []
+        },
+        {
+          "id": "tmw7oab5fsgr",
+          "kind": "text",
+          "asset_id": null,
+          "start": 1,
+          "duration": 1,
+          "transform": {
+            "x": 0,
+            "y": 60,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1
+          },
+          "text": {
+            "text": "Penjelasan singkat\npoin pertama di sini.",
+            "style": {
+              "font": "Poppins",
+              "size": 70,
+              "color": "#ffffff",
+              "outline_color": "#000000",
+              "outline": 4,
+              "shadow": 2,
+              "bold": true,
+              "italic": false,
+              "background": "",
+              "align": "center"
+            }
+          },
+          "in": 0,
+          "speed": 1,
+          "volume": 1,
+          "muted": false,
+          "fade_in": 0,
+          "fade_out": 0,
+          "fit": "contain",
+          "motion": {
+            "kind": "none",
+            "amount": 0.15
+          },
+          "background": "none",
+          "chroma": {
+            "enabled": false,
+            "color": "#00ff00",
+            "similarity": 0.3,
+            "blend": 0.1
+          },
+          "transition": {
+            "kind": "none",
+            "duration": 0.5
+          },
+          "color": {
+            "brightness": 1,
+            "contrast": 1,
+            "saturation": 1,
+            "hue": 0,
+            "temperature": 0,
+            "lut": ""
+          },
+          "keyframes": []
+        },
+        {
+          "id": "tmw7oab5fux8",
+          "kind": "text",
+          "asset_id": null,
+          "start": 2,
+          "duration": 1,
+          "transform": {
+            "x": 0,
+            "y": 60,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1
+          },
+          "text": {
+            "text": "Penjelasan singkat\npoin kedua di sini.",
+            "style": {
+              "font": "Poppins",
+              "size": 70,
+              "color": "#ffffff",
+              "outline_color": "#000000",
+              "outline": 4,
+              "shadow": 2,
+              "bold": true,
+              "italic": false,
+              "background": "",
+              "align": "center"
+            }
+          },
+          "in": 0,
+          "speed": 1,
+          "volume": 1,
+          "muted": false,
+          "fade_in": 0,
+          "fade_out": 0,
+          "fit": "contain",
+          "motion": {
+            "kind": "none",
+            "amount": 0.15
+          },
+          "background": "none",
+          "chroma": {
+            "enabled": false,
+            "color": "#00ff00",
+            "similarity": 0.3,
+            "blend": 0.1
+          },
+          "transition": {
+            "kind": "none",
+            "duration": 0.5
+          },
+          "color": {
+            "brightness": 1,
+            "contrast": 1,
+            "saturation": 1,
+            "hue": 0,
+            "temperature": 0,
+            "lut": ""
+          },
+          "keyframes": []
+        },
+        {
+          "id": "tmw7oab5fw7i",
+          "kind": "text",
+          "asset_id": null,
+          "start": 3,
+          "duration": 1,
+          "transform": {
+            "x": 0,
+            "y": 60,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1
+          },
+          "text": {
+            "text": "Penjelasan singkat\npoin ketiga di sini.",
+            "style": {
+              "font": "Poppins",
+              "size": 70,
+              "color": "#ffffff",
+              "outline_color": "#000000",
+              "outline": 4,
+              "shadow": 2,
+              "bold": true,
+              "italic": false,
+              "background": "",
+              "align": "center"
+            }
+          },
+          "in": 0,
+          "speed": 1,
+          "volume": 1,
+          "muted": false,
+          "fade_in": 0,
+          "fade_out": 0,
+          "fit": "contain",
+          "motion": {
+            "kind": "none",
+            "amount": 0.15
+          },
+          "background": "none",
+          "chroma": {
+            "enabled": false,
+            "color": "#00ff00",
+            "similarity": 0.3,
+            "blend": 0.1
+          },
+          "transition": {
+            "kind": "none",
+            "duration": 0.5
+          },
+          "color": {
+            "brightness": 1,
+            "contrast": 1,
+            "saturation": 1,
+            "hue": 0,
+            "temperature": 0,
+            "lut": ""
+          },
+          "keyframes": []
+        },
+        {
+          "id": "tmw7oab5fy8w",
+          "kind": "text",
+          "asset_id": null,
+          "start": 4,
+          "duration": 1,
+          "transform": {
+            "x": 0,
+            "y": 140,
+            "scale": 1,
+            "rotation": 0,
+            "opacity": 1
+          },
+          "text": {
+            "text": "untuk tips berikutnya",
+            "style": {
+              "font": "Poppins",
+              "size": 70,
+              "color": "#ffffff",
+              "outline_color": "#000000",
+              "outline": 4,
+              "shadow": 2,
+              "bold": true,
+              "italic": false,
+              "background": "",
+              "align": "center"
+            }
+          },
+          "in": 0,
+          "speed": 1,
+          "volume": 1,
+          "muted": false,
+          "fade_in": 0,
+          "fade_out": 0,
+          "fit": "contain",
+          "motion": {
+            "kind": "none",
+            "amount": 0.15
+          },
+          "background": "none",
+          "chroma": {
+            "enabled": false,
+            "color": "#00ff00",
+            "similarity": 0.3,
+            "blend": 0.1
+          },
+          "transition": {
+            "kind": "none",
+            "duration": 0.5
+          },
+          "color": {
+            "brightness": 1,
+            "contrast": 1,
+            "saturation": 1,
+            "hue": 0,
+            "temperature": 0,
+            "lut": ""
+          },
+          "keyframes": []
+        }
+      ]
+    },
+    {
+      "id": "a1",
+      "kind": "audio",
+      "name": "Audio",
+      "muted": false,
+      "hidden": false,
+      "clips": []
+    }
+  ],
+  "captions": {
+    "enabled": false,
+    "words": [],
+    "style": {
+      "font": "Impact",
+      "size": 80,
+      "color": "#ffffff",
+      "highlight_color": "#ffe600",
+      "outline_color": "#000000",
+      "outline": 5,
+      "shadow": 2,
+      "background": "",
+      "bold": false,
+      "uppercase": true,
+      "words_per_page": 3,
+      "max_line_chars": 16,
+      "y": 0.72,
+      "x": 0,
+      "highlight_scale": 1.15,
+      "animation": "pop"
+    }
+  },
+  "template": {
+    "name": "Carousel 5 slide",
+    "description": "Feed 4:5: judul, tiga poin, dan ajakan simpan & follow. Ekspor lewat Proyek > Ekspor carousel.",
+    "ratio": "1080×1350",
+    "duration": 5
+  }
+}

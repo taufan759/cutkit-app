@@ -111,6 +111,10 @@ test("MCP: video cepat lalu ekspor sungguhan (butuh cutkit-cli dan ffmpeg)", { s
   assert.equal(png.toString("latin1", 1, 4), "PNG");
   assert.deepEqual([png.readUInt32BE(16), png.readUInt32BE(20)], [360, 640], "kanvas 1080x1920 diperkecil ke tinggi 640");
   assert.notEqual(images[0].data, images[1].data, "detik 0.5 (merah) beda dengan 2.5 (biru)");
+  const car = await c.call("cutkit_export_carousel", { project: proj, folder: path.join(dir, "slide") });
+  assert.equal(car.slides.length, 2, "dua visual = dua slide");
+  const slide = fs.readFileSync(car.slides[1]);
+  assert.deepEqual([slide.readUInt32BE(16), slide.readUInt32BE(20)], [1080, 1920], "slide ukuran penuh kanvas");
   const out = path.join(dir, "hasil.mp4");
   const ex = await c.call("cutkit_export", { project: proj, output: out, quality: "fast" }, { progressToken: "p1" });
   assert.equal(ex.output, out);

@@ -154,6 +154,13 @@ const commands = {
   open_path: () => null,
   reveal_path: () => null,
   launch_project: () => null,
+  export_carousel: ({ project, dir, format }) => {
+    const cli = path.resolve(__dirname, "../../target/release", process.platform === "win32" ? "cutkit-cli.exe" : "cutkit-cli");
+    const pj = path.join(CACHE, "carousel-project.json");
+    fs.mkdirSync(CACHE, { recursive: true });
+    fs.writeFileSync(pj, JSON.stringify(project));
+    return JSON.parse(execFileSync(cli, ["carousel", pj, dir, "--format", format || "png"], { encoding: "utf8" })).slides;
+  },
   bank_prepare: () => {
     const dir = path.join(CACHE, "bank");
     const cli = path.resolve(__dirname, "../../target/release", process.platform === "win32" ? "cutkit-cli.exe" : "cutkit-cli");

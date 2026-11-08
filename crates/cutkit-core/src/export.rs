@@ -850,6 +850,15 @@ pub fn build_frame(project: &Project, t: f64, output: &str, max_height: u32, fon
     Ok(ExportJob { steps, duration: t1 - t0, output: output.to_string(), chunked: false })
 }
 
+/// Waktu slide carousel: titik tengah tiap klip di track video utama (track video pertama yang
+/// berisi gambar/video), urut waktu. Tiap slide diekspor sebagai satu gambar lewat build_frame.
+pub fn carousel_times(project: &Project) -> Vec<f64> {
+    let Some(main) = project.tracks.iter().find(|t| t.kind == TrackKind::Video && t.clips.iter().any(|c| c.kind != ClipKind::Effect && c.kind != ClipKind::Text)) else { return vec![] };
+    let mut v: Vec<f64> = main.clips.iter().filter(|c| c.duration > 0.0 && c.kind != ClipKind::Effect && c.kind != ClipKind::Text).map(|c| c.start + c.duration / 2.0).collect();
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    v
+}
+
 /// Rencana ekspor lengkap: sekali jalan untuk proyek pendek, bertahap untuk video panjang.
 pub fn build_job(project: &Project, opts: &ExportOptions) -> Result<ExportJob, String> {
     let duration = check(project, opts)?;
@@ -955,6 +964,17 @@ mod tests {
         assert!(a.ends_with("-an -frames:v 1 -update 1 -f image2 cutkit-frame.png"));
         assert!(job.steps[1].args.join(" ").contains("min(ih,720)"));
         assert!(build_frame(&Project::new("x"), 0.0, "f.png", 720, "").is_err());
+    }
+
+    #[test]
+    fn carousel_slides_are_main_track_clip_midpoints() {
+        let p = project();
+        assert_eq!(carousel_times(&p), vec![2.0], "satu klip di track utama, overlay tidak dihitung");
+        let mut q = Project::new("c");
+        for i in 0..3 {
+            q.tracks[0].clips.push(Clip { id: format!("s{i}"), kind: ClipKind::Image, start: i as f64, duration: 1.0, ..Default::default() });
+        }
+        assert_eq!(carousel_times(&q), vec![0.5, 1.5, 2.5]);
     }
 
     #[test]

@@ -506,6 +506,12 @@ const TOOLS = [
     },
   },
   {
+    name: "cutkit_export_carousel",
+    description: "Mengekspor carousel (Instagram/TikTok foto): tiap klip di track video utama jadi satu gambar ukuran penuh (slide-01.png, ...), lengkap dengan teks, caption, stiker, dan efek. Pakai proyek rasio 4:5 atau 1:1, atau template 'Carousel 5 slide'.",
+    inputSchema: { type: "object", required: ["project", "folder"], properties: { project: PROJECT, folder: str("Folder hasil"), format: { type: "string", enum: ["png", "jpg"] } } },
+    run: async (a) => cli(["carousel", path.resolve(a.project), path.resolve(a.folder), "--format", a.format || "png"]),
+  },
+  {
     name: "cutkit_open_in_app",
     description: "Membuka proyek di aplikasi CutKit supaya pengguna bisa melihat, memutar, dan merapikan sendiri hasil susunan.",
     inputSchema: { type: "object", required: ["project"], properties: { project: PROJECT } },
