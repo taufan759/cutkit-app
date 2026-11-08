@@ -37,11 +37,13 @@ function client() {
     if (r.result.isError) throw new Error(text);
     return JSON.parse(text);
   };
-  return { request, call, notes, close: () => child.stdin.end() };
+  const close = () => { child.stdin.end(); setTimeout(() => child.kill(), 2000).unref(); };
+  return { request, call, notes, close };
 }
 
-test("MCP: initialize, tools/list, dan edit proyek tanpa ffmpeg", async () => {
+test("MCP: initialize, tools/list, dan edit proyek tanpa ffmpeg", async (t) => {
   const c = client();
+  t.after(() => c.close());
   const init = await c.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "tes", version: "1" } });
   assert.equal(init.result.serverInfo.name, "cutkit");
   assert.ok(init.result.capabilities.tools);
@@ -86,7 +88,7 @@ test("MCP: initialize, tools/list, dan edit proyek tanpa ffmpeg", async () => {
   c.close();
 });
 
-test("MCP: video cepat lalu ekspor sungguhan (butuh cutkit-cli dan ffmpeg)", { skip: !fs.existsSync(CLI) && "cutkit-cli belum dibuild" }, async () => {
+test("MCP: video cepat lalu ekspor sungguhan (butuh cutkit-cli dan ffmpeg)", { skip: !fs.existsSync(CLI) && "cutkit-cli belum dibuild" }, async (t) => {
   let ffmpeg;
   try { ffmpeg = execFileSync(process.platform === "win32" ? "where" : "which", ["ffmpeg"], { encoding: "utf8" }).split(/\r?\n/)[0].trim(); } catch { return; }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cutkit-mcp-ekspor-"));
@@ -95,6 +97,7 @@ test("MCP: video cepat lalu ekspor sungguhan (butuh cutkit-cli dan ffmpeg)", { s
   const vo = path.join(dir, "vo.wav");
   execFileSync(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=f=300:d=3", vo]);
   const c = client();
+  t.after(() => c.close());
   await c.request("initialize", { protocolVersion: "2025-06-18", capabilities: {} });
   const proj = path.join(dir, "cepat.cutkit.json");
   await c.call("cutkit_new_project", { project: proj, ratio: "9:16" });

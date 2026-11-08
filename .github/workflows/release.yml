@@ -11,6 +11,7 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -60,6 +61,7 @@ jobs:
 
   linux:
     runs-on: ubuntu-22.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -117,6 +119,7 @@ jobs:
 
   macos:
     runs-on: macos-latest
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
 
@@ -124,8 +127,10 @@ jobs:
         with:
           node-version: 22
 
-      - name: ffmpeg untuk tes
-        run: brew install ffmpeg
+      - name: ffmpeg untuk tes (ffmpeg-full: termasuk libass)
+        run: |
+          brew install ffmpeg-full
+          echo "$(brew --prefix ffmpeg-full)/bin" >> "$GITHUB_PATH"
 
       - name: Rust stable + target universal
         run: |

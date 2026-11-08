@@ -109,7 +109,7 @@ fn demo_media_is_generated() {
         return;
     };
     let dir = tmp_dir("demo");
-    let (media, jobs) = cutkit_core::demo::demo_jobs(&dir);
+    let (media, jobs) = cutkit_core::demo::demo_jobs(&dir, cutkit_core::ffmpeg::has_filter(&tools.ffmpeg, "flite"));
     for (_, args) in &jobs {
         run(&tools.ffmpeg, args).expect("media contoh dibuat");
     }

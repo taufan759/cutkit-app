@@ -438,7 +438,7 @@ async fn make_demo(dir: String, state: State<'_, AppState>) -> Result<cutkit_cor
     blocking(move || {
         let dir = PathBuf::from(dir);
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        let (media, jobs) = cutkit_core::demo::demo_jobs(&dir);
+        let (media, jobs) = cutkit_core::demo::demo_jobs(&dir, ffmpeg::has_filter(&tools.ffmpeg, "flite"));
         for (out, args) in jobs {
             if !Path::new(&out).is_file() {
                 ffmpeg::run(&tools.ffmpeg, &args)?;

@@ -73,7 +73,8 @@ pub fn find_tools(override_dir: Option<&str>) -> Option<Tools> {
         }
     }
     if !cfg!(windows) {
-        for d in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/snap/bin", "/opt/local/bin"] {
+        // ffmpeg-full Homebrew (keg-only) didahulukan: ffmpeg biasa Homebrew tidak menyertakan libass.
+        for d in ["/opt/homebrew/opt/ffmpeg-full/bin", "/usr/local/opt/ffmpeg-full/bin", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/snap/bin", "/opt/local/bin"] {
             candidates.push(PathBuf::from(d));
         }
     }
@@ -110,13 +111,18 @@ pub fn major_version(version: &str) -> u32 {
     v.split(|c: char| !c.is_ascii_digit()).next().and_then(|d| d.parse().ok()).unwrap_or(99)
 }
 
-/// Filter whisper (auto caption) hanya ada di ffmpeg 8+ yang dibangun dengan whisper.cpp.
-pub fn has_whisper(ffmpeg: &str) -> bool {
+/// Apakah ffmpeg ini punya filter `name` (whisper, flite, ass, ... tergantung cara ffmpeg dibangun).
+pub fn has_filter(ffmpeg: &str, name: &str) -> bool {
     quiet(Command::new(ffmpeg).args(["-hide_banner", "-filters"]))
         .stdin(Stdio::null())
         .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.split_whitespace().nth(1) == Some("whisper")))
+        .map(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.split_whitespace().nth(1) == Some(name)))
         .unwrap_or(false)
+}
+
+/// Filter whisper (auto caption) hanya ada di ffmpeg 8+ yang dibangun dengan whisper.cpp.
+pub fn has_whisper(ffmpeg: &str) -> bool {
+    has_filter(ffmpeg, "whisper")
 }
 
 /// ffmpeg di bawah 7 belum mengenal `-/filter_complex <file>`; pakai `-filter_complex_script` yang setara.
@@ -205,7 +211,7 @@ pub fn install_hint() -> &'static str {
     if cfg!(windows) {
         "winget install Gyan.FFmpeg"
     } else if cfg!(target_os = "macos") {
-        "brew install ffmpeg"
+        "brew install ffmpeg-full"
     } else {
         "sudo apt install ffmpeg (butuh ffmpeg 7 atau lebih baru), atau klik Pasang otomatis"
     }
@@ -264,11 +270,12 @@ pub fn install_ffmpeg(mut on_line: impl FnMut(String)) -> Result<(), String> {
     }
     if cfg!(target_os = "macos") {
         let Some(brew) = brew() else {
-            return Err("Homebrew belum terpasang. Pasang dari https://brew.sh, lalu jalankan: brew install ffmpeg".into());
+            return Err("Homebrew belum terpasang. Pasang dari https://brew.sh, lalu jalankan: brew install ffmpeg-full".into());
         };
-        on_line("Menjalankan: brew install ffmpeg".into());
+        // ffmpeg-full: termasuk libass (teks/caption) yang tidak ada di formula ffmpeg biasa.
+        on_line("Menjalankan: brew install ffmpeg-full".into());
         let mut cmd = Command::new(brew);
-        cmd.args(["install", "ffmpeg"]).env("HOMEBREW_NO_AUTO_UPDATE", "1");
+        cmd.args(["install", "ffmpeg-full"]).env("HOMEBREW_NO_AUTO_UPDATE", "1");
         let status = stream_lines(cmd, &mut on_line).map_err(|e| format!("brew gagal dijalankan: {e}"))?;
         return if status.success() { Ok(()) } else { Err(format!("brew berhenti dengan kode {:?}.", status.code())) };
     }
